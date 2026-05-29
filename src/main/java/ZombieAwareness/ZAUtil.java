@@ -3,6 +3,7 @@ package ZombieAwareness;
 import java.util.*;
 
 import CoroUtil.util.*;
+import mcheli.aircraft.MCH_EntityAircraft;
 import net.minecraft.block.Block;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
@@ -297,13 +298,14 @@ public class ZAUtil {
 		
 	}
     
-    public static void huntTarget(EntityLiving ent, EntityLivingBase targ, int pri) {
+    public static void huntTarget(EntityLiving ent, EntityLivingBase targ, String reason) {
+        ent.getEntityData().setString("ChaseReason", reason);
     	CoroUtilPath.tryMoveToEntityLivingLongDist(ent, targ, 1);
 		if (ent instanceof EntityLiving) (ent).setAttackTarget(targ);
 	}
 	
 	public static void huntTarget(EntityLiving ent, EntityLivingBase targ) {
-		huntTarget(ent, targ, 0);
+		huntTarget(ent, targ, "None");
 	}
     
 	public static boolean isEnemy(Entity ent, Entity targ) {
@@ -368,6 +370,50 @@ public class ZAUtil {
 		} catch (Exception ex) {
 			
 		}*/
+
+        EntityLivingBase getAttackedEntity = ent.getAttackTarget();
+        if (getAttackedEntity != null) {
+            if (ent.getEntityData().getString("ChaseReason").equals("Driver")) {
+                if (!getAttackedEntity.isRiding()) {
+                    ent.setAttackTarget(null);
+                }
+            }
+        }
+        if (ent.getAttackTarget() == null) {
+
+            MCH_EntityAircraft closestAircraft = null;
+            double closestDist = Double.MAX_VALUE;
+
+            List<MCH_EntityAircraft> aircrafts =
+                    ent.world.getEntitiesWithinAABB(
+                            MCH_EntityAircraft.class,
+                            ent.getEntityBoundingBox().grow(64D)
+                    );
+
+            for (MCH_EntityAircraft aircraft : aircrafts) {
+
+                if (aircraft.isDead) continue;
+
+                if (aircraft.getCurrentThrottle() <= 0.01F) continue;
+
+                double dist = ent.getDistanceSq(aircraft);
+
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestAircraft = aircraft;
+                }
+            }
+
+            if (closestAircraft != null) {
+                EntityPlayer driver = closestAircraft.getFirstMountPlayer();
+                if(driver != null) {
+                    huntTarget(ent, driver, "Driver");
+                } else {
+                    ent.getEntityData().setString("ChaseReason", "Vehicle");
+                    CoroUtilPath.tryMoveToEntityLivingLongDist(ent, closestAircraft, 1);
+                }
+            }
+        }
 		
 		EntityScent senseTracked = null;
 		
@@ -441,7 +487,7 @@ public class ZAUtil {
 		    		int lightValue = entP.world.getLightFromNeighbors(pos);
 		    		
 		    		if (lightValue > 4) {
-		    			if ((ent.getDistanceToEntity(entP) > 64 && (ent.world.rand.nextInt(20) == 0) || 
+		    			if ((ent.getDistance(entP) > 64 && (ent.world.rand.nextInt(20) == 0) ||
 		    					ent.world.rayTraceBlocks(new Vec3d(ent.posX, ent.posY + (double)ent.getEyeHeight(), ent.posZ), new Vec3d(rX, rY, rZ)) == null)) {
 		    				if (CoroUtilPath.tryMoveToXYZLongDist(ent, rX, rY, rZ, 1)) {
 		    					//ZombieAwareness.dbg("pathing to lightsource at " + rX + ", " + rY + ", " + rZ + " - " + ent);
@@ -493,7 +539,7 @@ public class ZAUtil {
 	            {
 	            	if (omniscient || (ZAConfig.seeThroughWalls || ((EntityLivingBase) entity1).canEntityBeSeen(ent))) {
 	            		if (sanityCheck(ent, entity1)/* && entity1 instanceof EntityPlayer*/) {
-	            			float dist = ent.getDistanceToEntity(entity1);
+	            			float dist = ent.getDistance(entity1);
 	            			if (dist < closest) {
 	            				closest = dist;
 	            				clEnt = entity1;
@@ -535,7 +581,7 @@ public class ZAUtil {
 
             if (entCheck instanceof EntityScent) {
             	
-            	double dist = entSource.getDistanceToEntity(entCheck);
+            	double dist = entSource.getDistance(entCheck);
             	
             	//if (dist < distBest) {
 		            if (dist < ((EntityScent)entCheck).getRange() && dist > 5.0F && entSource.world.rand.nextInt(20) == 0) {
@@ -1072,7 +1118,7 @@ public class ZAUtil {
 		//added max dist and blocks loaded check due to https://github.com/Corosauce/ZombieAwareness/issues/11
 		double distMaxCancel = 75;
     	if (!lookupLastAlertTime.containsKey(entAlerted) || lookupLastAlertTime.get(entAlerted) + alertDelay < entAlerted.world.getTotalWorldTime()) {
-			if (entAlerted.getDistanceToEntity(entTargetted) < distMaxCancel
+			if (entAlerted.getDistance(entTargetted) < distMaxCancel
                     && entAlerted.getEntityWorld().provider.getDimension() == entTargetted.getEntityWorld().provider.getDimension()
 					&& entAlerted.getEntityWorld().isBlockLoaded(entAlerted.getPosition())
 					&& entTargetted.getEntityWorld().isBlockLoaded(entTargetted.getPosition())) {

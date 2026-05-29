@@ -184,7 +184,7 @@ public class ZombieAwareness implements IPFCallback {
 	        			
 	        			ZAUtil.tickAI((EntityLiving)ent);
 	        			
-	        			if (!((EntityLiving)ent).getNavigator().noPath() && ent.onGround && ent.isCollidedHorizontally) {
+	        			if (!((EntityLiving)ent).getNavigator().noPath() && ent.onGround && ent.collidedHorizontally) {
 	        				//ent.motionY = 0.41999998688697815D;
 	        			}
 	        			
@@ -221,7 +221,7 @@ public class ZombieAwareness implements IPFCallback {
 		        					} else if (ZAConfigFeatures.extraSpawningCave && lastZombieCount < ZAConfigSpawning.maxZombiesNight/*lastZombieCountCaves < ZAConfigSpawning.extraSpawningCavesMaxCount*/) {
 		        						EntityPlayer closestPlayer = ent.world.getNearestAttackablePlayer(ent, ZAConfigSpawning.extraSpawningDistMax, ZAConfigSpawning.extraSpawningDistMax);
 			        					if (closestPlayer != null && (!ZAConfigPlayerLists.whiteListUsedExtraSpawning || ZAConfigPlayerLists.whitelistExtraSpawning.contains(CoroUtilEntity.getName(closestPlayer))) 
-			        							&& closestPlayer.getDistanceSqToEntity(ent) > ZAConfigSpawning.extraSpawningDistMin
+			        							&& closestPlayer.getDistanceSq(ent) > ZAConfigSpawning.extraSpawningDistMin
 			        							&& !ent.world.canSeeSky(new BlockPos(x, y, z)) && ent.world.getLightFromNeighbors(new BlockPos(x, y, z)) < 5) {
 			        						
 			        						//Block id = 
