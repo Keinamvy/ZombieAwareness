@@ -1,5 +1,7 @@
 package com.nll.nightmareesm;
 
+import net.minecraft.world.entity.EntitySpawnReason;
+import com.nll.nightmareesm.MobBehavs.MobDigDown;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -135,5 +137,71 @@ public class NightmareStageGateTest {
       assertTrue(nightmareesm.canUseBehaviorForStage("tnt_sapper", 10));
       assertTrue(nightmareesm.canUseBehaviorForStage("creeper_breach", 10));
       assertTrue(nightmareesm.canUseBehaviorForStage("start_fires", 10));
+   }
+
+   @Test
+   @DisplayName("canRollAsScreamer blocks MOB_SUMMONED and REINFORCEMENT clones while allowing NATURAL and EVENT at stage 7+")
+   void testCanRollAsScreamer() {
+      // Locked before stage 7
+      for (int stage = 0; stage < 7; stage++) {
+         assertFalse(nightmareesm.canRollAsScreamer(EntitySpawnReason.NATURAL, stage));
+         assertFalse(nightmareesm.canRollAsScreamer(EntitySpawnReason.EVENT, stage));
+         assertFalse(nightmareesm.canRollAsScreamer(EntitySpawnReason.MOB_SUMMONED, stage));
+         assertFalse(nightmareesm.canRollAsScreamer(EntitySpawnReason.REINFORCEMENT, stage));
+      }
+
+      // At stage 7+: clone / summon reasons blocked to avoid scream duplicate cascades
+      for (int stage : new int[]{7, 8, 9, 10}) {
+         assertFalse(nightmareesm.canRollAsScreamer(EntitySpawnReason.MOB_SUMMONED, stage),
+            "MOB_SUMMONED must not become a screamer at stage " + stage);
+         assertFalse(nightmareesm.canRollAsScreamer(EntitySpawnReason.REINFORCEMENT, stage),
+            "REINFORCEMENT must not become a screamer at stage " + stage);
+
+         assertTrue(nightmareesm.canRollAsScreamer(EntitySpawnReason.NATURAL, stage),
+            "NATURAL spawn can roll as screamer at stage " + stage);
+         assertTrue(nightmareesm.canRollAsScreamer(EntitySpawnReason.EVENT, stage),
+            "EVENT spawn can roll as screamer at stage " + stage);
+         assertTrue(nightmareesm.canRollAsScreamer(EntitySpawnReason.SPAWNER, stage),
+            "SPAWNER spawn can roll as screamer at stage " + stage);
+      }
+   }
+
+   @Test
+   @DisplayName("GetNearestTarget.isValidSurvivalPlayerTarget only targets non-creative, non-spectator survival players")
+   void testIsValidSurvivalPlayerTarget() {
+      assertTrue(GetNearestTarget.isValidSurvivalPlayerTarget(false, false),
+         "Survival player (!creative && !spectator) must be a valid target");
+      assertFalse(GetNearestTarget.isValidSurvivalPlayerTarget(true, false),
+         "Creative player must NOT be a valid target");
+      assertFalse(GetNearestTarget.isValidSurvivalPlayerTarget(false, true),
+         "Spectator player must NOT be a valid target");
+      assertFalse(GetNearestTarget.isValidSurvivalPlayerTarget(true, true),
+         "Creative spectator player must NOT be a valid target");
+   }
+
+   @Test
+   @DisplayName("MobDigDown.computeHorizontalDistance accurately calculates distance across all quadrants and offsets")
+   void testComputeHorizontalDistance() {
+      // Basic 3-4-5 right triangle
+      assertEquals(5.0, MobDigDown.computeHorizontalDistance(0.0, 0.0, 3.0, 4.0), 1e-6);
+
+      // Same position
+      assertEquals(0.0, MobDigDown.computeHorizontalDistance(100.5, -200.5, 100.5, -200.5), 1e-6);
+
+      // Negative coordinates in same quadrant
+      assertEquals(5.0, MobDigDown.computeHorizontalDistance(-10.0, -20.0, -13.0, -24.0), 1e-6);
+
+      // Across quadrants (+, +) to (-, -)
+      assertEquals(10.0, MobDigDown.computeHorizontalDistance(3.0, 4.0, -3.0, -4.0), 1e-6);
+
+      // Quadrant offset (+, -) to (-, +)
+      assertEquals(Math.sqrt(200.0), MobDigDown.computeHorizontalDistance(5.0, -5.0, -5.0, 5.0), 1e-6);
+   }
+
+   @Test
+   @DisplayName("ZAUtil portal block check and friendly fire handling null safety")
+   void testZAUtilHelpers() {
+      assertFalse(com.corosus.zombieawareness.ZAUtil.isPortalBlock(null));
+      assertFalse(com.corosus.zombieawareness.ZAUtil.shouldBlockHostileFriendlyFireOrAggro(null, null));
    }
 }

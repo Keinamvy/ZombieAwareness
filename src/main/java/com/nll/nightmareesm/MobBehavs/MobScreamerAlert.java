@@ -9,7 +9,9 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 
 public class MobScreamerAlert {
-   public static boolean tickScreamer(Zombie zombie) {
+   private static long lastGlobalScreamTick = -999999L;
+
+   public static boolean checkAndTrigger(Zombie zombie) {
       if (zombie == null) {
          return false;
       }
@@ -18,6 +20,12 @@ public class MobScreamerAlert {
          && zombie.getTarget() != null
          && zombie.level() instanceof ServerLevel serverLevel) {
 
+         long gameTime = serverLevel.getGameTime();
+         if (gameTime - lastGlobalScreamTick < 100L) {
+            return false;
+         }
+
+         lastGlobalScreamTick = gameTime;
          zombie.addTag("za_screamer_triggered");
          serverLevel.playSound(null, zombie.getX(), zombie.getY(), zombie.getZ(), SoundEvents.WARDEN_ROAR, SoundSource.HOSTILE, 2.5F, 1.0F);
          serverLevel.playSound(null, zombie.getX(), zombie.getY(), zombie.getZ(), SoundEvents.GHAST_SCREAM, SoundSource.HOSTILE, 2.0F, 1.0F);
@@ -26,5 +34,13 @@ public class MobScreamerAlert {
          return true;
       }
       return false;
+   }
+
+   public static boolean tickScreamer(Zombie zombie) {
+      return checkAndTrigger(zombie);
+   }
+
+   public static void resetLastGlobalScreamTick() {
+      lastGlobalScreamTick = -999999L;
    }
 }

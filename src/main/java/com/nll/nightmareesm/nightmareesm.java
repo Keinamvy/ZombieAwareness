@@ -108,8 +108,11 @@ public final class nightmareesm implements ModInitializer {
 
    public static void LivingMobTick(Entity Entity_Class, int currentStage, boolean isBloodmoon) {
       if (Entity_Class instanceof Mob Entity_Mob) {
+         if (Entity_Mob.entityTags().contains("za_crawler")) {
+            Entity_Mob.setPose(net.minecraft.world.entity.Pose.SWIMMING);
+         }
          Level Lvl = MobInfo.GetMobLevel(Entity_Mob);
-         if (isTick(Entity_Mob) && (isBloodmoon || isSiegeDay(Entity_Mob)) && Lvl != null && !Lvl.isClientSide()) {
+         if (isTick(Entity_Mob) && (isBloodmoon || isSiegeDay(Entity_Mob) || Entity_Mob.entityTags().contains("za_horde_mob") || Entity_Mob.entityTags().contains("za_tnt_sapper")) && Lvl != null && !Lvl.isClientSide()) {
             new MobTargetPlayer(Entity_Class, isBloodmoon);
 
             if (Entity_Class instanceof Creeper C) {
@@ -200,7 +203,7 @@ public final class nightmareesm implements ModInitializer {
                   boolean allowPickaxe = canUseBehaviorForStage("PICKAXE_DIG", currentStage);
                   new NightmareZombie(z, allowPickaxe);
 
-                  if (canUseBehaviorForStage("SCREAMER_SCOUT", currentStage)) {
+                  if (canRollAsScreamer(Spawn_Reason, currentStage)) {
                      if (new RNG().GetInt(0, 100) < 8) {
                         makeScreamer(z);
                      }
@@ -258,6 +261,12 @@ public final class nightmareesm implements ModInitializer {
             }
          }
       }
+   }
+
+   public static boolean canRollAsScreamer(EntitySpawnReason reason, int currentStage) {
+      return reason != EntitySpawnReason.MOB_SUMMONED
+         && reason != EntitySpawnReason.REINFORCEMENT
+         && canUseBehaviorForStage("SCREAMER_SCOUT", currentStage);
    }
 
    public static void makeScreamer(Zombie z) {

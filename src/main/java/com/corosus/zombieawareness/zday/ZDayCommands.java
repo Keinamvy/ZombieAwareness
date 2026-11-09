@@ -57,7 +57,7 @@ public class ZDayCommands {
             try {
                 Class<?> heatClass = Class.forName("com.corosus.zombieawareness.heat.ChunkHeatManager");
                 int heat = (int) heatClass.getMethod("getHeatAtBlockPos", int.class, int.class, long.class)
-                        .invoke(null, player.getBlockX(), player.getBlockZ(), player.level().getDefaultClockTime());
+                        .invoke(null, player.getBlockX(), player.getBlockZ(), player.level().getGameTime());
                 source.sendSuccess(() -> Component.literal("§7Local Chunk Heat: §e" + heat + " / " + ZAConfigZDay.chunkHeatThreshold), false);
             } catch (Throwable ignored) {
             }

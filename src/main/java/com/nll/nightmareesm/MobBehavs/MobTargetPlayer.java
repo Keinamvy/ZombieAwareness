@@ -39,8 +39,8 @@ public class MobTargetPlayer {
    boolean WithinRange(Entity Targeted_Entity, Entity Entity_Class) {
       float Target_Dist_AboveGround = ((Integer)ESMConfig.MonsterAttackDistanceAboveGround.get()).intValue();
       float Target_Dist_UnderGround = ((Integer)ESMConfig.MonsterAttackDistanceUnderground.get()).intValue();
-      double X_To = Math.abs(Math.abs(Targeted_Entity.getX()) - Math.abs(Entity_Class.getX()));
-      double Z_To = Math.abs(Math.abs(Targeted_Entity.getZ()) - Math.abs(Entity_Class.getZ()));
+      double X_To = Math.abs(Targeted_Entity.getX() - Entity_Class.getX());
+      double Z_To = Math.abs(Targeted_Entity.getZ() - Entity_Class.getZ());
       float Y_Pos = Entity_Class.blockPosition().getY();
       return Y_Pos < 50.0F
          ? Targeted_Entity.distanceTo(Entity_Class) < Target_Dist_UnderGround

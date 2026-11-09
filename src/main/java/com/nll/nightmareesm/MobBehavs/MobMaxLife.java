@@ -17,9 +17,6 @@ public class MobMaxLife {
    }
 
    void KillMobRiding(Entity Entity_Class) {
-      Entity Veh = Entity_Class.getVehicle();
-      if (Veh instanceof LivingEntity) {
-         Veh.discard();
-      }
+      Entity_Class.stopRiding();
    }
 }

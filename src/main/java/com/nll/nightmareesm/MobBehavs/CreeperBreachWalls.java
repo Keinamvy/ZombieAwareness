@@ -24,14 +24,14 @@ public class CreeperBreachWalls {
          if (Creeper_Target != null) {
             Entity Creeper_Entity = C;
             if (Creeper_Target instanceof ServerPlayer Plyr) {
-               if (!Plyr.isCreative()) {
+               if (!Plyr.isCreative() && !Plyr.isSpectator()) {
                   float Dist_To_Tgt = C.distanceTo(Creeper_Target);
                   boolean isCloseEnough = Dist_To_Tgt < ((Integer)ESMConfig.CreeperBreachingDistance.get()).intValue();
                   int Ticks = this.GetTicks(C);
                   if (!this.isAtWall(Creeper_Entity) && !this.isWithinStrikingDistance(C, Plyr)) {
                      this.ResetTicks(C);
                   } else if (isCloseEnough) {
-                     C.lookAt(C, 1.0F, 1.0F);
+                     C.lookAt(Plyr, 30.0F, 30.0F);
                      this.IncTicks(C);
                      if (Ticks > (Integer)ESMConfig.CreeperObstructedExplodeTicks.get()) {
                         new CreeperExplode(C);
@@ -84,7 +84,8 @@ public class CreeperBreachWalls {
       float z_diff = Math.abs(Creeper_Pos.getZ() - Player_Pos.getZ());
       return x_diff < ((Integer)ESMConfig.CreeperAboveExplodeDistance.get()).intValue()
          && z_diff < ((Integer)ESMConfig.CreeperAboveExplodeDistance.get()).intValue()
-         && Player_Pos.getY() < Creeper_Pos.getY();
+         && Creeper_Pos.getY() > Player_Pos.getY()
+         && (Creeper_Pos.getY() - Player_Pos.getY()) <= 10;
    }
 
    boolean isWithinStrikingDistance(Creeper C, ServerPlayer Player_Target) {

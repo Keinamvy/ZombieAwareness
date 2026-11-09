@@ -8,7 +8,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.phys.Vec3;
 
 public class MobDigDown {
    public MobDigDown(Mob M) {
@@ -16,13 +15,20 @@ public class MobDigDown {
       if (!M.isSwinging()) {
          BlockPos Zombie_Pos = M_Entity.blockPosition();
          Entity Tgt = M.getTarget();
-         if (Tgt != null && Tgt instanceof ServerPlayer && this.isTargetUnderMonster(M, Tgt) && this.isCloseEnough(M, Tgt)) {
+         if (Tgt != null && Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && !Server_Player.isSpectator()
+               && this.isTargetUnderMonster(M, Tgt) && this.isCloseEnough(M, Tgt)) {
             BlockPos Under_BlockPos = Zombie_Pos.below();
             Level Lvl = MobInfo.GetMobLevel(M);
-            Block Dmg_Block = Lvl.getBlockState(Under_BlockPos).getBlock();
-            new MobDamageBlock(M_Entity, Dmg_Block, Under_BlockPos);
+            if (Lvl != null) {
+               Block Dmg_Block = Lvl.getBlockState(Under_BlockPos).getBlock();
+               new MobDamageBlock(M_Entity, Dmg_Block, Under_BlockPos);
+            }
          }
       }
+   }
+
+   public static double computeHorizontalDistance(double x1, double z1, double x2, double z2) {
+      return Math.hypot(x1 - x2, z1 - z2);
    }
 
    boolean isCloseEnough(Mob M, Entity Tgt) {
@@ -30,8 +36,7 @@ public class MobDigDown {
       double M_Z = M.blockPosition().getZ();
       double Tgt_X = Tgt.blockPosition().getX();
       double Tgt_Z = Tgt.blockPosition().getZ();
-      Vec3 VecDistXZ = new Vec3(Math.abs(M_X - Tgt_X), 0.0, Math.abs(M_Z - Tgt_Z));
-      double ActualXZDistToTgt = VecDistXZ.distanceTo(Tgt.position());
+      double ActualXZDistToTgt = computeHorizontalDistance(M_X, M_Z, Tgt_X, Tgt_Z);
       if (ActualXZDistToTgt < (Double)ESMConfig.ZombieDigProximity.get()) {
          double M_Y = M.blockPosition().getY();
          double Tgt_Y = Tgt.blockPosition().getY();

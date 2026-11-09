@@ -27,7 +27,12 @@ public class ConfigHelper {
    }
 
    public static boolean ConfigHasValue(ConfigValue<List<? extends String>> Config, Block Block_Val, boolean ContainsSearch) {
-      return ConfigHasValue(Config, Block_Val.getName().getString().toLowerCase(), ContainsSearch);
+      String key = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(Block_Val).toString().toLowerCase(java.util.Locale.ROOT);
+      if (ConfigHasValue(Config, key, ContainsSearch)) {
+         return true;
+      }
+      String path = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(Block_Val).getPath().toLowerCase(java.util.Locale.ROOT);
+      return ConfigHasValue(Config, path, ContainsSearch);
    }
 
    public static boolean ConfigHasValue(ConfigValue<List<? extends String>> Config, String Val, boolean ContainsSearch) {

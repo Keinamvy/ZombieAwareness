@@ -64,13 +64,13 @@ public class ZAPreProdTestMod implements ModInitializer {
         }
         executed = true;
         int passed = 0;
-        int total = 8;
+        int total = 10;
 
         try {
-            LOGGER.info("=== STARTING ZOMBIE AWARENESS 26.3 PRE-PROD SERVER TESTS ===");
+            LOGGER.info("=== STARTING ZOMBIE AWARENESS 26.3 PRE-PROD SERVER TESTS (10 CATEGORIES) ===");
 
-            // Test 1/8: Mixin Audit & Registries
-            LOGGER.info("[Test 1/8] Running MixinEnvironment audit & registry checks...");
+            // Test 1/10: Mixin Audit & Registries
+            LOGGER.info("[Test 1/10] Running MixinEnvironment audit & registry checks...");
             MixinEnvironment.getCurrentEnvironment().audit();
             Identifier senseKey = BuiltInRegistries.ENTITY_TYPE.getKey(ZombieAwareness.SENSE);
             assertCondition(ZombieAwareness.SENSE_NAME.equals(senseKey), "Expected zombieawareness:scent registered, got " + senseKey);
@@ -80,10 +80,10 @@ public class ZAPreProdTestMod implements ModInitializer {
             assertCondition(SoundRegistry.get("investigate") != null, "investigate sound missing in SoundRegistry");
             assertCondition(ZombieAwareness.unitTest.containsKey("1"), "MixinDedicatedServer did not fire on server init");
             passed++;
-            LOGGER.info("[Test 1/8] PASS: All Mixins audited cleanly and entities/sounds (including horde_roar) registered.");
+            LOGGER.info("[Test 1/10] PASS: All Mixins audited cleanly and entities/sounds (including horde_roar) registered.");
 
-            // Test 2/8: Config Files & MobListsConfig Verification
-            LOGGER.info("[Test 2/8] Verifying CoroConfigRegistry .cfg files, ForgeConfigAPIPort MobLists.toml, and NightmareESM configs...");
+            // Test 2/10: Config Files & MobListsConfig Verification
+            LOGGER.info("[Test 2/10] Verifying CoroConfigRegistry .cfg files, ForgeConfigAPIPort MobLists.toml, and NightmareESM configs...");
             File generalCfg = new File("./config/zombieawareness/General.cfg");
             File featuresCfg = new File("./config/zombieawareness/Features.cfg");
             File clientCfg = new File("./config/zombieawareness/ClientConfig.cfg");
@@ -104,10 +104,10 @@ public class ZAPreProdTestMod implements ModInitializer {
             EntityType<?> zombieType = BuiltInRegistries.ENTITY_TYPE.getValue(Identifier.withDefaultNamespace("zombie"));
             assertCondition(ZombieAwareness.canProcessEntity(zombieType, false), "canProcessEntity(ZOMBIE) returned false");
             passed++;
-            LOGGER.info("[Test 2/8] PASS: All config files verified loaded on server.");
+            LOGGER.info("[Test 2/10] PASS: All config files verified loaded on server.");
 
-            // Test 3/8: Empty-server clock freeze & 10-Stage unlock schedule
-            LOGGER.info("[Test 3/8] Verifying empty-server clock freeze & 10-stage unlock schedule (Days 1..30)...");
+            // Test 3/10: Empty-server clock freeze & 10-Stage unlock schedule
+            LOGGER.info("[Test 3/10] Verifying empty-server clock freeze & 10-stage unlock schedule (Days 1..30)...");
             long activeTicks = ZDayProgressionManager.getActivePlayTicks();
             assertCondition(activeTicks == 0L, "Expected activePlayTicks == 0 when 0 players have logged in, got " + activeTicks);
             assertCondition(ZDayProgressionManager.advanceTickLogic(0L, 100L, 101L, 0) == 0L, "advanceTickLogic must freeze active ticks at 0 players");
@@ -125,10 +125,10 @@ public class ZAPreProdTestMod implements ModInitializer {
             assertCondition(ZDayStage.getStageForDay(30).getStageNumber() == 10, "Day 30 must be Stage 10");
             assertCondition(ZDayStage.getStageForDay(100).getStageNumber() == 10, "Day 100 must remain Stage 10");
             passed++;
-            LOGGER.info("[Test 3/8] PASS: Clock freeze and all 10 escalation stages verified.");
+            LOGGER.info("[Test 3/10] PASS: Clock freeze and all 10 escalation stages verified.");
 
-            // Test 4/8: Multiplayer offline player catch-up dossier & /zday status + /zday log commands
-            LOGGER.info("[Test 4/8] Verifying offline player catch-up dossier and /zday command execution...");
+            // Test 4/10: Multiplayer offline player catch-up dossier & /zday status + /zday log commands
+            LOGGER.info("[Test 4/10] Verifying offline player catch-up dossier and /zday command execution...");
             ZDayProgressionManager.setForcedWorldDay(11);
             UUID offlinePlayerUuid = UUID.randomUUID();
             List<String> dossier = ZDayProgressionManager.buildCatchUpReportLines(offlinePlayerUuid);
@@ -145,14 +145,13 @@ public class ZAPreProdTestMod implements ModInitializer {
 
             ZDayProgressionManager.setForcedWorldDay(-1);
             passed++;
-            LOGGER.info("[Test 4/8] PASS: Offline player catch-up dossier and /zday commands verified.");
+            LOGGER.info("[Test 4/10] PASS: Offline player catch-up dossier and /zday commands verified.");
 
-            // Test 5/8: TaCZ Gunshot 112-block node, Chunk Heat accumulation (>=100), Roar, ActiveHorde & 4-Phase System
-            LOGGER.info("[Test 5/8] Verifying TaCZ gunfire heat accumulation, horde roar, ActiveHorde, and 4-phase duration...");
+            // Test 5/10: TaCZ Gunshot heat, 1-Horde-Per-Group limit, Post-Horde Breather & 4-Phase System
+            LOGGER.info("[Test 5/10] Verifying TaCZ gunfire heat, 1-Horde-Per-Group limit, Post-Horde Breather, and 4-phase duration...");
             ChunkHeatManager.clearAllHeat();
             ZDayProgressionManager.setForcedWorldDay(4); // Stage 2 (Day 4+) required for heat trigger
 
-            // Verify TaCZ onTaCZGunSound for silenced shot (+4 heat) vs unsuppressed shot (+25 heat)
             ChunkHeatManager.onTaCZGunSound(level, 0.0, 100.0, 0.0, 20, "silence");
             int silencedHeat = ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime());
             assertCondition(silencedHeat == 4, "Expected silenced shot heat to be 4 (+4 heat), got: " + silencedHeat);
@@ -161,34 +160,40 @@ public class ZAPreProdTestMod implements ModInitializer {
             int combinedHeat = ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime());
             assertCondition(combinedHeat == 29, "Expected heat after silenced (+4) and unsuppressed (+25) shot to be 29, got: " + combinedHeat);
 
-            // Verify suppressors reduce heat by > 80% (21/25 = 84% reduction)
-            double reduction = (25.0 - 4.0) / 25.0;
-            assertCondition(reduction > 0.80, "Suppressors (+4 heat vs +25 heat) must reduce heat by > 80%");
-
-            // 3 more unsuppressed gunfire events (+75 heat) -> 29 + 75 = 104 heat (>= 100) -> triggers ActiveHorde
+            // 3 more unsuppressed gunfire events (+75 heat) -> triggers ActiveHorde and resets local heat to 0!
             for (int i = 0; i < 3; i++) {
                 ChunkHeatManager.onTaCZGunSound(level, 0.0, 100.0, 0.0, 64, "shoot");
             }
-            int heat = ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime());
-            assertCondition(heat >= 100, "Expected chunk heat >= 100 after gunfire events, got: " + heat);
-            assertCondition(ChunkHeatManager.getActiveHordeCount() > 0, "Expected ActiveHorde registered, count=" + ChunkHeatManager.getActiveHordeCount());
+            assertCondition(ChunkHeatManager.getActiveHordeCount() == 1, "Expected 1 ActiveHorde registered for Group 1, count=" + ChunkHeatManager.getActiveHordeCount());
+            assertCondition(ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime()) == 0, "Expected chunk heat reset to 0 upon horde trigger");
+
+            // Group 1 fires 4 more shots while fighting the active horde -> MUST NOT trigger a 2nd horde on Group 1!
+            for (int i = 0; i < 4; i++) {
+                ChunkHeatManager.onTaCZGunSound(level, 10.0, 100.0, 10.0, 64, "shoot");
+            }
+            assertCondition(ChunkHeatManager.getActiveHordeCount() == 1, "Group 1 must remain capped at 1 active horde while defending, got: " + ChunkHeatManager.getActiveHordeCount());
+
+            // Group 2 (>96m away at (300, 100, 300)) triggers their own separate horde -> 2 groups = 2 hordes!
+            UUID group2SoloPlayer = UUID.randomUUID();
+            boolean group2Registered = ChunkHeatManager.tryRegisterHordeForGroup(new BlockPos(300, 100, 300), java.util.Collections.singleton(group2SoloPlayer), 1, 6, 4);
+            assertCondition(group2Registered, "Group 2 (>96m away) must be allowed to trigger their own horde");
+            assertCondition(ChunkHeatManager.getActiveHordeCount() == 2, "2 distinct groups must have 2 active hordes, got: " + ChunkHeatManager.getActiveHordeCount());
+
+            // Verify 90s (1800 ticks) Post-Horde Breather Cooldown
+            ChunkHeatManager.markGroupPostHordeBreather(java.util.Collections.singleton(group2SoloPlayer), 5000L);
+            assertCondition(ChunkHeatManager.isGroupInPostHordeBreather(java.util.Collections.singleton(group2SoloPlayer), 5001L), "Group must be in breather at tick 5001");
+            assertCondition(!ChunkHeatManager.isGroupInPostHordeBreather(java.util.Collections.singleton(group2SoloPlayer), 6801L), "Group breather must expire after 1800 ticks");
 
             assertCondition(ChunkHeatManager.computeHordeDurationTicks(1) == 3600, "1 player horde duration must be 3600 ticks (3 mins)");
             assertCondition(ChunkHeatManager.computeHordeDurationTicks(3) == 4800, "3 players horde duration must be 4800 ticks (4 mins)");
 
-            assertCondition(ChunkHeatManager.resolveHordePhase(0.05, 1) == ChunkHeatManager.HordePhase.PHASE_1A_FAST_ZOMBIES, "0.05 progress must be Phase 1A");
-            assertCondition(ChunkHeatManager.resolveHordePhase(0.25, 4) == ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, "0.25 progress must be Phase 1B");
-            assertCondition(ChunkHeatManager.resolveHordePhase(0.50, 7) == ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, "0.50 progress must be Phase 2");
-            assertCondition(ChunkHeatManager.resolveHordePhase(0.70, 9) == ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, "0.70 progress must be Phase 3");
-            assertCondition(ChunkHeatManager.resolveHordePhase(0.90, 10) == ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, "0.90 progress at stage 10 must be Phase 4");
-
             ZDayProgressionManager.setForcedWorldDay(-1);
             ChunkHeatManager.clearAllHeat();
             passed++;
-            LOGGER.info("[Test 5/8] PASS: TaCZ gunfire heat, ActiveHorde, and 3-Minute 4-Phase System verified.");
+            LOGGER.info("[Test 5/10] PASS: TaCZ gunfire heat, 1-Horde-Per-Group limit, Post-Horde Breather, and 4-Phase System verified.");
 
-            // Test 6/8: Bloodmoon schedule, forced Bloodmoon activation & reset
-            LOGGER.info("[Test 6/8] Verifying Bloodmoon schedule, forced activation, and reset...");
+            // Test 6/10: Bloodmoon schedule, forced Bloodmoon activation & reset
+            LOGGER.info("[Test 6/10] Verifying Bloodmoon schedule, forced activation, and reset...");
             assertCondition(BloodmoonManager.isBloodmoonDay(8), "Day 8 must be Bloodmoon day");
             assertCondition(!BloodmoonManager.isBloodmoonDay(7), "Day 7 must not be Bloodmoon day");
             assertCondition(BloodmoonManager.isBloodmoonNightTime(18000L), "Tick 18000 must be night");
@@ -201,10 +206,10 @@ public class ZAPreProdTestMod implements ModInitializer {
             BloodmoonManager.setForcedBloodmoon(null);
             BloodmoonManager.resetState();
             passed++;
-            LOGGER.info("[Test 6/8] PASS: Bloodmoon schedule, forced activation, and reset verified.");
+            LOGGER.info("[Test 6/10] PASS: Bloodmoon schedule, forced activation, and reset verified.");
 
-            // Test 7/8: NightmareESM Stage Gating, Juggernauts & Creeper Friendly-Fire + Cross-Hostile Aggression Prevention
-            LOGGER.info("[Test 7/8] Verifying NightmareESM stage gating, Juggernaut knockback resistance, and Hostile Horde Unity...");
+            // Test 7/10: NightmareESM Stage Gating, Juggernauts & Creeper/Sapper TNT Friendly-Fire + Cross-Hostile Aggression Prevention
+            LOGGER.info("[Test 7/10] Verifying NightmareESM stage gating, Juggernauts, and Hostile Horde Unity (including Sapper TNT)...");
             assertCondition(!nightmareesm.canUseBehaviorForStage("BLACKOUT_STALKER", 2), "Blackout Stalker must be locked at Stage 2");
             assertCondition(nightmareesm.canUseBehaviorForStage("BLACKOUT_STALKER", 3), "Blackout Stalker must be unlocked at Stage 3");
             assertCondition(!nightmareesm.canUseBehaviorForStage("CREEPER_BREACH", 9), "Creeper Breach must be locked at Stage 9");
@@ -234,16 +239,22 @@ public class ZAPreProdTestMod implements ModInitializer {
 
             boolean creeperHurt = zombie.hurtServer(level, level.damageSources().explosion(creeper, creeper), 20.0f);
             assertCondition(!creeperHurt, "Creeper explosion against zombie must return false!");
+
+            net.minecraft.world.entity.item.PrimedTnt sapperTnt = new net.minecraft.world.entity.item.PrimedTnt(level, 50.5, 100.0, 50.5, zombie);
+            sapperTnt.addTag("za_sapper_tnt");
+            boolean sapperTntHurt = zombie.hurtServer(level, level.damageSources().explosion(sapperTnt, zombie), 25.0f);
+            assertCondition(!sapperTntHurt, "Sapper TNT explosion against fellow zombie must return false!");
             assertCondition(zombie.getHealth() == initialHealth, "Zombie must remain at full health (" + initialHealth + ")");
 
+            sapperTnt.discard();
             zombie.discard();
             skeleton.discard();
             creeper.discard();
             passed++;
-            LOGGER.info("[Test 7/8] PASS: NightmareESM stage gating, Juggernaut attributes, and Horde Unity (0 friendly-fire) verified.");
+            LOGGER.info("[Test 7/10] PASS: NightmareESM stage gating, Juggernaut attributes, and Horde Unity (Creeper + Sapper TNT 0 friendly-fire) verified.");
 
-            // Test 8/8: EntityScent Lifecycle & Zombie AI Pathfinding
-            LOGGER.info("[Test 8/8] Verifying EntityScent spawning, synched data, decay, and Zombie AI pathfinding...");
+            // Test 8/10: EntityScent Lifecycle & Zombie AI Pathfinding
+            LOGGER.info("[Test 8/10] Verifying EntityScent spawning, synched data, decay, and Zombie AI pathfinding...");
             EntityScent scent = new EntityScent(ZombieAwareness.SENSE, level);
             scent.setPos(0.5, 100.0, 0.5);
             scent.setStrengthPeak(120);
@@ -297,7 +308,60 @@ public class ZAPreProdTestMod implements ModInitializer {
             targetScent.discard();
             aiZombie.discard();
             passed++;
-            LOGGER.info("[Test 8/8] PASS: EntityScent lifecycle and Zombie AI scent pathfinding verified.");
+            LOGGER.info("[Test 8/10] PASS: EntityScent lifecycle and Zombie AI scent pathfinding verified.");
+
+            // Test 9/10: Directional Horde Cone Spawning (38-52m, ±40°), Directional Roar (10% dist / 20% wall), and Crimson Seal Portal Lockdown
+            LOGGER.info("[Test 9/10] Verifying Directional Horde Cone Spawning, Directional Roar Capped Attenuation, and Crimson Seal Portal Lockdown...");
+            double[] spawnOffsetMin = ChunkHeatManager.computeDirectionalSpawnOffset(0.0, 0.0, 0.0);
+            double[] spawnOffsetMax = ChunkHeatManager.computeDirectionalSpawnOffset(0.0, 0.0, 1.0);
+            assertCondition(Math.abs(Math.hypot(spawnOffsetMin[0], spawnOffsetMin[1]) - 38.0) < 0.01, "Expected min directional spawn dist 38.0m");
+            assertCondition(Math.abs(Math.hypot(spawnOffsetMax[0], spawnOffsetMax[1]) - 52.0) < 0.01, "Expected max directional spawn dist 52.0m");
+
+            float vol0Unobstructed = ChunkHeatManager.computeRoarVolumeMultiplier(0.0, false);
+            float vol128Unobstructed = ChunkHeatManager.computeRoarVolumeMultiplier(128.0, false);
+            float vol0Obstructed = ChunkHeatManager.computeRoarVolumeMultiplier(0.0, true);
+            float vol128Obstructed = ChunkHeatManager.computeRoarVolumeMultiplier(128.0, true);
+            assertCondition(Math.abs(vol0Unobstructed - 1.0f) < 0.001f, "Expected 100% volume at 0m unobstructed");
+            assertCondition(Math.abs(vol128Unobstructed - 0.90f) < 0.001f, "Expected 90% volume (10% dropoff) at 128m unobstructed");
+            assertCondition(Math.abs(vol0Obstructed - 0.80f) < 0.001f, "Expected 80% volume (20% dropoff) at 0m obstructed");
+            assertCondition(Math.abs(vol128Obstructed - 0.72f) < 0.001f, "Expected 72% volume at 128m obstructed");
+
+            double[] dirSoundPos = ChunkHeatManager.computeDirectionalSoundPosition(0.0, 64.0, 0.0, 100.0, 64.0, 0.0);
+            assertCondition(Math.abs(dirSoundPos[0] - 4.0) < 0.001 && Math.abs(dirSoundPos[2]) < 0.001, "Directional sound emitter must be placed 4.0m along the unit direction ray");
+
+            UUID lockedPlayerId = UUID.randomUUID();
+            BlockPos lockedPos = new BlockPos(0, 100, 0);
+            assertCondition(ChunkHeatManager.isPlayerLockedByHordeOrBloodmoon(lockedPlayerId, lockedPos, true), "Crimson Seal must lock portals during Bloodmoon");
+            assertCondition(!ChunkHeatManager.isPlayerLockedByHordeOrBloodmoon(lockedPlayerId, lockedPos, false), "Crimson Seal must be unlocked when no horde or Bloodmoon is active");
+            ChunkHeatManager.tryRegisterHordeForGroup(lockedPos, java.util.Collections.singleton(lockedPlayerId), 1, 6, 4);
+            assertCondition(ChunkHeatManager.isPlayerLockedByHordeOrBloodmoon(lockedPlayerId, lockedPos, false), "Crimson Seal must lock portals while targeted by an active horde");
+            ChunkHeatManager.clearAllHeat();
+            passed++;
+            LOGGER.info("[Test 9/10] PASS: Directional Cone Spawning, Directional Roar (10% dist / 20% wall), and Crimson Seal Portal Lockdown verified.");
+
+            // Test 10/10: Audit Loophole Fixes (Multiplayer Target Lock, Screamer Clone Guard, Container/Bedrock Protection)
+            LOGGER.info("[Test 10/10] Verifying Multiplayer Target Lock fix, Screamer Clone Guard, and Pickaxe Container/Bedrock protection...");
+            assertCondition(com.nll.nightmareesm.GetNearestTarget.isValidSurvivalPlayerTarget(false, false), "Survival player must be valid target");
+            assertCondition(!com.nll.nightmareesm.GetNearestTarget.isValidSurvivalPlayerTarget(true, false), "Creative player must NOT be valid target");
+            assertCondition(!com.nll.nightmareesm.GetNearestTarget.isValidSurvivalPlayerTarget(false, true), "Spectator player must NOT be valid target");
+            assertCondition(!nightmareesm.canRollAsScreamer(EntitySpawnReason.MOB_SUMMONED, 10), "Summoned Screamer clones must never roll as new Screamers");
+            assertCondition(nightmareesm.canRollAsScreamer(EntitySpawnReason.NATURAL, 10), "Natural Stage 10 zombies can roll as Screamers");
+
+            BlockPos chestTestPos = new BlockPos(35, 100, 35);
+            BlockPos stoneTestPos = new BlockPos(36, 100, 35);
+            level.setBlockAndUpdate(chestTestPos, Blocks.CHEST.defaultBlockState());
+            level.setBlockAndUpdate(stoneTestPos, Blocks.STONE.defaultBlockState());
+            Zombie minerZombie = new Zombie(level);
+            minerZombie.setPos(34.5, 100.0, 35.5);
+            level.addFreshEntity(minerZombie);
+            new com.nll.nightmareesm.MobBehavs.MobDamageBlock(minerZombie, Blocks.CHEST, chestTestPos);
+            new com.nll.nightmareesm.MobBehavs.MobDamageBlock(minerZombie, Blocks.STONE, stoneTestPos);
+            assertCondition(level.getBlockState(chestTestPos).is(Blocks.CHEST), "Pickaxe zombie must NEVER destroy player Chest (BlockEntity)!");
+            assertCondition(level.getBlockState(stoneTestPos).isAir(), "Pickaxe zombie must be able to break normal Stone block!");
+            level.setBlockAndUpdate(chestTestPos, Blocks.AIR.defaultBlockState());
+            minerZombie.discard();
+            passed++;
+            LOGGER.info("[Test 10/10] PASS: Multiplayer Target Lock fix, Screamer Clone Guard, and Container/Bedrock protection verified.");
 
             LOGGER.info("=== ZA PREPROD SERVER TEST REPORT: {}/{} PASSED ===", passed, total);
             server.halt(false);

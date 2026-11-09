@@ -7,8 +7,10 @@ import com.corosus.zombieawareness.config.ZAConfigFeatures;
 import com.corosus.zombieawareness.config.ZAConfigGeneral;
 import com.corosus.zombieawareness.config.ZAConfigPlayerLists;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -18,6 +20,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Enemy;
@@ -29,7 +32,10 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.ButtonBlock;
+import net.minecraft.world.level.block.EndGatewayBlock;
+import net.minecraft.world.level.block.EndPortalBlock;
 import net.minecraft.world.level.block.LeverBlock;
+import net.minecraft.world.level.block.NetherPortalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.PushReaction;
@@ -38,6 +44,7 @@ import net.minecraft.world.phys.AABB;
 import org.joml.Vector3d;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ZAUtil {
     
@@ -165,7 +172,82 @@ public class ZAUtil {
     	return null;
     }
 	
+    public static final Map<UUID, Long> lastPortalLockdownMessageTick = new ConcurrentHashMap<>();
+
+    public static boolean isPortalBlock(BlockState state) {
+        if (state == null) return false;
+        return state.getBlock() instanceof NetherPortalBlock
+            || state.getBlock() instanceof EndPortalBlock
+            || state.getBlock() instanceof EndGatewayBlock;
+    }
+
+    public static boolean isStandingInOrNearPortal(Player player) {
+        if (player == null) return false;
+        if (player.portalProcess != null && player.portalProcess.isInsidePortalThisTick()) {
+            return true;
+        }
+        Level level = player.level();
+        BlockPos pPos = player.blockPosition();
+        for (BlockPos checkPos : BlockPos.betweenClosed(pPos.offset(-1, -1, -1), pPos.offset(1, 1, 1))) {
+            if (isPortalBlock(level.getBlockState(checkPos))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean checkPortalLockdown(ServerPlayer player) {
+        if (player == null || player.isCreative() || player.isSpectator()) {
+            return false;
+        }
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+        if (!isStandingInOrNearPortal(player)) {
+            return false;
+        }
+
+        boolean isBloodmoon = com.corosus.zombieawareness.bloodmoon.BloodmoonManager.isBloodmoonActive(serverLevel);
+        boolean isLocked = com.corosus.zombieawareness.heat.ChunkHeatManager.isPlayerLockedByHordeOrBloodmoon(
+            player.getUUID(),
+            player.blockPosition(),
+            isBloodmoon
+        );
+
+        if (!isLocked) {
+            return false;
+        }
+
+        if (player.portalProcess != null) {
+            player.portalProcess = null;
+        }
+        player.setPortalCooldown(100);
+
+        net.minecraft.world.phys.Vec3 look = player.getLookAngle();
+        double pushX = -look.x * 0.5;
+        double pushZ = -look.z * 0.5;
+        if (Math.abs(pushX) < 0.05 && Math.abs(pushZ) < 0.05) {
+            pushZ = -0.3;
+        }
+        player.setDeltaMovement(pushX, 0.25, pushZ);
+
+        serverLevel.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.RESPAWN_ANCHOR_DEPLETE.value(), SoundSource.PLAYERS, 1.5F, 0.8F);
+        serverLevel.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.WARDEN_HEARTBEAT, SoundSource.PLAYERS, 1.5F, 0.8F);
+
+        long gameTime = serverLevel.getGameTime();
+        Long lastTick = lastPortalLockdownMessageTick.get(player.getUUID());
+        if (lastTick == null || gameTime - lastTick >= 60L) {
+            lastPortalLockdownMessageTick.put(player.getUUID(), gameTime);
+            player.sendSystemMessage(Component.literal("§4§l[!] THE HORDE HAS YOUR SCENT — DIMENSIONAL RIFTS ARE SEALED!"));
+        }
+
+        return true;
+    }
+
 	public static void tickPlayer(Player player) {
+		if (player instanceof ServerPlayer serverPlayer) {
+			checkPortalLockdown(serverPlayer);
+		}
     	
 		if (ZAConfigFeatures.wanderingHordes) {
 
@@ -254,8 +336,19 @@ public class ZAUtil {
 		return entity instanceof Enemy || entity instanceof Monster;
 	}
 
-	public static boolean shouldBlockHostileFriendlyFireOrAggro(Entity attacker, Entity victim) {
-		return attacker != null && victim != null && isHostileMob(attacker) && isHostileMob(victim);
+	public static boolean shouldBlockHostileFriendlyFireOrAggro(Entity sourceOrAttacker, Entity victim) {
+		if (sourceOrAttacker == null || victim == null) {
+			return false;
+		}
+		if (isHostileMob(victim)) {
+			if (isHostileMob(sourceOrAttacker)) {
+				return true;
+			}
+			if (sourceOrAttacker instanceof PrimedTnt tnt && (tnt.entityTags().contains("za_sapper_tnt") || isHostileMob(tnt.getOwner()))) {
+				return true;
+			}
+		}
+		return false;
 	}
 	
     public static boolean isEnemy(Entity ent, Entity targ, boolean omniTarget) {

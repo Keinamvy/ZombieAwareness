@@ -24,44 +24,42 @@ public class MobBuildUp {
 
    public MobBuildUp(Mob M) {
       Entity Tgt = M.getTarget();
-      if (Tgt != null && Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && this.isCloseEnough(M, Tgt)) {
+      if (Tgt != null && Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && !Server_Player.isSpectator()
+            && this.isCloseEnough(M, Tgt) && this.isPlayerHighEnough(M, Tgt)) {
          Entity Entity_Class = M;
-         if (this.isBelowPlayer(M, Tgt) && this.isPlayerHighEnough(M, Tgt)) {
-            BlockPos M_BlockPos = M.blockPosition();
-            BlockPos M_BlockPos_Above = M_BlockPos.above();
-            BlockPos M_BlockPos_AboveHead = M_BlockPos_Above.above();
-            ServerLevel Server_Level = MobInfo.GetMobServerLevel(Server_Player);
+         BlockPos M_BlockPos = M.blockPosition();
+         BlockPos M_BlockPos_Above = M_BlockPos.above();
+         ServerLevel Server_Level = MobInfo.GetMobServerLevel(Server_Player);
+         if (Server_Level != null) {
             BlockState Block_State = Server_Level.getBlockState(M_BlockPos_Above);
-            if (Block_State.isAir()) {
+            if (Block_State.isAir() || Block_State.canBeReplaced()) {
                Vec3 Norm_Build_Dir = this.GetBuildDir(M, Tgt);
                BlockPos New_Pos = PositionInfo.OffsetPos(M_BlockPos, Norm_Build_Dir.x, Norm_Build_Dir.y, Norm_Build_Dir.z);
-               new MobPlaceBlock(Entity_Class, this.Block_Type, New_Pos);
-               M.setPos(M.blockPosition().getX(), M.blockPosition().getY() + 2, M.blockPosition().getZ());
-               new SnapToBlockCenter(Entity_Class);
-               M.swing(M.getUsedItemHand(), SwingAnimation.DEFAULT);
-               this.isDoing = true;
+               BlockState targetState = Server_Level.getBlockState(New_Pos);
+               if (targetState.isAir() || targetState.canBeReplaced()) {
+                  new MobPlaceBlock(Entity_Class, this.Block_Type, New_Pos);
+                  M.setPos(M.blockPosition().getX(), M.blockPosition().getY() + 2, M.blockPosition().getZ());
+                  new SnapToBlockCenter(Entity_Class);
+                  M.swing(M.getUsedItemHand(), SwingAnimation.DEFAULT);
+                  this.isDoing = true;
+               }
             }
          }
       }
    }
 
    boolean isCloseEnough(Mob M, Entity Tgt) {
-      double M_X = M.blockPosition().getX();
-      double M_Z = M.blockPosition().getZ();
-      double Tgt_X = Tgt.blockPosition().getX();
-      double Tgt_Z = Tgt.blockPosition().getZ();
-      return Math.abs(M_X - Tgt_X) < this.BuildUpDist && Math.abs(M_Z - Tgt_Z) < this.BuildUpDist;
+      double horizontalDist = Math.hypot(M.getX() - Tgt.getX(), M.getZ() - Tgt.getZ());
+      return horizontalDist <= 16.0;
    }
 
    boolean isPlayerHighEnough(Mob M, Entity Tgt) {
-      int Dist = Math.abs(M.blockPosition().getY() - Tgt.blockPosition().getY());
-      return Dist > 1;
+      double verticalDist = Tgt.getY() - M.getY();
+      return verticalDist >= 1.5 && verticalDist <= 24.0;
    }
 
    boolean isBelowPlayer(Mob M, Entity Tgt) {
-      BlockPos M_BlockPos = M.blockPosition();
-      BlockPos T_BlockPos = Tgt.blockPosition();
-      return M_BlockPos.getY() < T_BlockPos.getY();
+      return Tgt.getY() - M.getY() >= 1.5;
    }
 
    Vec3 GetBuildDir(Mob M, Entity Tgt) {

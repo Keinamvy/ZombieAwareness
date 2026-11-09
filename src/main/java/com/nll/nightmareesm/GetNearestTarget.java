@@ -32,6 +32,19 @@ public class GetNearestTarget {
       if (Entity_Count > 0) {
          float Winning_Distance = 999999.0F;
          Entity Winning_Target = Nearby_Entities.getFirst();
+         if (!this.isEntitySurvivalModeOrMob(Winning_Target)) {
+            Winning_Target = null;
+            for (Entity entity : Nearby_Entities) {
+               if (this.isEntitySurvivalModeOrMob(entity)) {
+                  Winning_Target = entity;
+                  break;
+               }
+            }
+         }
+         if (Winning_Target == null) {
+            return null;
+         }
+         Winning_Distance = Attacker.distanceTo(Winning_Target);
 
          for (int i = 0; i < Entity_Count; i++) {
             Entity PotentialTgt = Nearby_Entities.get(i);
@@ -58,7 +71,7 @@ public class GetNearestTarget {
 
       for (int i = 0; i < AllPlayerCount; i++) {
          ServerPlayer Plyr = All_Players.get(i);
-         if (!Plyr.isCreative() && Plyr.isAlive()) {
+         if (isValidSurvivalPlayerTarget(Plyr.isCreative(), Plyr.isSpectator()) && Plyr.isAlive()) {
             Compiled_Entities.add(Plyr);
             AlivePlayerCount++;
          }
@@ -86,7 +99,13 @@ public class GetNearestTarget {
       return Compiled_Entities;
    }
 
+   public static boolean isValidSurvivalPlayerTarget(boolean isCreative, boolean isSpectator) {
+      return !isCreative && !isSpectator;
+   }
+
    boolean isEntitySurvivalModeOrMob(Entity Entity_Class) {
-      return Entity_Class instanceof ServerPlayer Server_Player ? Server_Player.isCreative() : true;
+      return Entity_Class instanceof ServerPlayer Server_Player
+            ? isValidSurvivalPlayerTarget(Server_Player.isCreative(), Server_Player.isSpectator())
+            : true;
    }
 }

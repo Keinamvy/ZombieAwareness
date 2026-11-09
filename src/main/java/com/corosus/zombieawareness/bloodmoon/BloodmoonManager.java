@@ -39,7 +39,7 @@ public class BloodmoonManager {
         if (level == null) {
             return false;
         }
-        int day = Math.max(ZDayProgressionManager.getActiveWorldDay(), (int) (level.getDefaultClockTime() / 24000L) + 1);
+        int day = ZDayProgressionManager.getActiveWorldDay();
         return isBloodmoonDay(day) && isBloodmoonNightTime(level.getDefaultClockTime());
     }
 
@@ -48,7 +48,7 @@ public class BloodmoonManager {
         if (!isBloodmoonActive(overworld)) {
             return;
         }
-        int currentDay = Math.max(ZDayProgressionManager.getActiveWorldDay(), (int) (overworld.getDefaultClockTime() / 24000L) + 1);
+        int currentDay = ZDayProgressionManager.getActiveWorldDay();
         if (lastDuskAlertDay != currentDay) {
             lastDuskAlertDay = currentDay;
             Component text = Component.literal("§4§l[Bloodmoon] The Crimson Moon rises! The horde knows no rest tonight!");
