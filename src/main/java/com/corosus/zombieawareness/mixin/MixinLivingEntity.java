@@ -3,12 +3,17 @@ package com.corosus.zombieawareness.mixin;
 import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.ZombieAwareness;
 import com.corosus.zombieawareness.config.ZAConfigGeneral;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.Creeper;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(LivingEntity.class)
 public abstract class MixinLivingEntity {
@@ -24,6 +29,37 @@ public abstract class MixinLivingEntity {
             if (ZombieAwareness.canProcessEntity(ent) && ent instanceof Mob) {
                 ZAUtil.tickAI((Mob) ent);
             }
+        }
+    }
+
+    @Inject(method = "hurtServer", at = @At("HEAD"), cancellable = true)
+    public void hookHurtServer(ServerLevel level, DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
+        Entity victim = (Entity)(Object)this;
+        Entity attacker = source.getEntity();
+        Entity directEntity = source.getDirectEntity();
+
+        if (((attacker instanceof Creeper || directEntity instanceof Creeper) && ZAUtil.isHostileMob(victim))
+                || ZAUtil.shouldBlockHostileFriendlyFireOrAggro(attacker, victim)
+                || ZAUtil.shouldBlockHostileFriendlyFireOrAggro(directEntity, victim)) {
+            cir.setReturnValue(false);
+            return;
+        }
+
+        if (victim instanceof Mob mob && !level.isClientSide()) {
+            try {
+                com.nll.nightmareesm.nightmareesm.onMobDamaged(
+                    mob,
+                    amount,
+                    com.corosus.zombieawareness.zday.ZDayProgressionManager.getCurrentStage().getStageNumber()
+                );
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    @Inject(method = "setLastHurtByMob", at = @At("HEAD"), cancellable = true)
+    public void hookSetLastHurtByMob(LivingEntity livingEntity, CallbackInfo ci) {
+        if (ZAUtil.shouldBlockHostileFriendlyFireOrAggro(livingEntity, (Entity)(Object)this)) {
+            ci.cancel();
         }
     }
 }

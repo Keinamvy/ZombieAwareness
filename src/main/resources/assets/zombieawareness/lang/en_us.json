@@ -1,5 +1,6 @@
 {
   "zombieawareness.subtitle.alert": "!",
   "zombieawareness.subtitle.target": "Mob Alerted",
-  "zombieawareness.subtitle.investigate": "Mob Investigating"
+  "zombieawareness.subtitle.investigate": "Mob Investigating",
+  "zombieawareness.subtitle.horde_roar": "Distant horde roars"
 }

@@ -45,6 +45,9 @@ Players using firearm mods like **TaCZ (Timeless and Classics Zero)** and atmosp
 - **No Day-1 Unfair Griefing**: Zombies must NEVER place TNT, light fires, or pickaxe through walls on Days 1–3.
 - **No Unconditional X-Ray Wall-Hack on Normal Nights**: On non-Bloodmoon nights, mobs must NOT lock onto silent, dark, full-health players through solid walls from 64 blocks away (`MobTargetPlayer` only locks on if the mob has line-of-sight, is within close proximity, or is on an active Bloodmoon / high-heat siege wave).
 - **No Global Punishment in Multiplayer**: One player shooting a rifle at `(1000, 1000)` must NOT spawn a horde on a stealthy player at `(-1000, -1000)`.
+- **No Hostile Friendly-Fire or Cross-Hostile Infighting**:
+  - **Creeper Explosion Immunity for Hostile Mobs**: Creeper explosions (including `CreeperBreachWalls`) must NEVER damage other hostile mobs (`Monster` / `Enemy`), so breaching creepers blow open walls without wiping out the zombie swarm.
+  - **Cross-Hostile Aggression Disabled**: Hostile mobs (`Monster` / `Enemy`) must NEVER target or aggro onto other hostile mobs (e.g., when a Skeleton's arrow hits a Zombie, neither takes friendly-fire aggro nor sets the other as its attack target via `Mob.setTarget` or `LivingEntity.setLastHurtByMob`).
 
 ---
 
@@ -85,10 +88,16 @@ Players using firearm mods like **TaCZ (Timeless and Classics Zero)** and atmosp
   - When triggered at Stage 2+ (Day 4+):
     1. Spawns an `EntityScent` sound node with `range = 112` blocks.
     2. Adds `+25` **Chunk Heat** to the shooter's `ChunkPos` region (`3x3` chunk cluster) in `ChunkHeatManager` (decays by `5` heat every second).
-- **Horde Roar & Overwhelming Wave (`ChunkHeatManager.triggerHordeWave`)**:
-  - When a `3x3` chunk cluster's heat reaches `100` (e.g., ~4 unsuppressed bursts or sustained fire, with a 60-second cooldown per region):
-    1. **The Roar**: Plays a layered, directional horror roar (`SoundEvents.WARDEN_ROAR` at pitch `0.55f`, `SoundEvents.RAVAGER_ROAR` at pitch `0.65f`, and `SoundEvents.ZOMBIE_VILLAGER_CONVERTED` at pitch `0.5f`) originating from the chosen spawn vector 32–45 blocks from the player, accompanied by an action-bar warning: `"§4§l[!] A MASSIVE HORDE HAS HEARD YOUR GUNFIRE — RUN!"`.
-    2. **The Overwhelming Wave**: Over the next 6 seconds (giving players a brief window to bolt), spawns `baseWaveSize * squadMultiplier` zombies (e.g., 16–40 zombies depending on World Day and nearby players within 64 blocks) on valid surface positions 28–45 blocks away, all given an initial `EntityScent` waypoint & long-distance path (`CoroUtilPath.tryMoveToXYZLongDist`) straight to the gunfire origin.
+- **Horde Roar & 3-Minute 4-Phase Horde Encounter (`ChunkHeatManager` + `ActiveHordeEvent`)**:
+  - When a `3x3` chunk cluster's heat reaches `100` (or a Screamer / Bloodmoon triggers a horde):
+    1. **The Roar**: Plays our custom `"horde_roar"` (`zombieawareness:horde_roar` backed by `horde_roar_1.ogg` and `horde_roar_2.ogg` with `128`-block attenuation) layered with `WARDEN_ROAR`, accompanied by `"§4§l[!] A MASSIVE HORDE HAS HEARD YOUR GUNFIRE — RUN!"`.
+    2. **Duration & Squad Scaling**: Starts a **3-Minute Active Horde Event** (`baseDurationTicks = 3600` = `180 seconds`) centered on the region. Each additional player within 64 blocks extends the horde duration by **+30 seconds (`+600 ticks`)** and scales sub-wave mob numbers by **`+50%` per extra player** (`1.0 + 0.5 * (nearbyPlayers - 1)`), while World Age (`Stage 1..10`) scales both the maximum Horde Phase unlocked and per-wave mob density/buffs.
+    3. **The 4 Intra-Horde Phases (Sub-waves spawn every 15 seconds / 300 ticks)**:
+       - **Phase 1A (0% – 15% elapsed | 0:00 – 0:27 — "Pure Fast Zombie Vanguard")**: Only **Fast Sprinter Zombies** (`giveRandomSpeedBoost` + `SPEED` I) confront the player first, forcing panic movement and draining loaded magazines.
+       - **Phase 1B (15% – 35% elapsed | 0:27 – 1:03 — "Venom & Web Flankers")**: Introduces **Cave Spiders & Spiders** alongside the fast zombies. Cave Spiders inflict **Poison** (dropping player HP below 50% so they emit `SCENT_BLOOD` trails!) and Spiders shoot **Cobwebs (`SpiderShootWeb`)** at Stage 6+ to pin fleeing gunners.
+       - **Phase 2 (35% – 60% elapsed | 1:03 – 1:48 — "Breachers & Suppression Fire", unlocked at World Stage 5+)**: Adds **Pickaxe Breacher Zombies** (`MobDig`) and **Blackout Stalkers** (`MobBreakLightSources`) supported by **Suppression Skeletons & Strays** (`NightmareSkeleton` / `SuperSkeleton` inflicting Slowness arrows from the backline without friendly-fire infighting).
+       - **Phase 3 (60% – 85% elapsed | 1:48 – 2:33 — "Juggernauts, Crawlers & Alchemists", unlocked at World Stage 8+)**: Adds **Armored Juggernaut Zombies** (`0.85` Knockback Resistance + heavy armor soaking TaCZ rounds in front), **Ankle-Biter Crawlers** (low-profile speed zombies inflicting Slowness), **Combat Engineers** (`MobBuildUp` / `MobBuildBridge`), and backline **Witches** throwing Weakness/Poison potions while buffing the horde.
+       - **Phase 4 (85% – 100% elapsed | 2:33 – 3:00+ — "Total Siege Climax", unlocked at World Stage 10 / Day 30+)**: Sounds a second Climax Horde Roar and unleashes **TNT Sapper Zombies** (`MobPlaceTNT`), **Fire-Starters** (`MobStartFires`), and **Wall-Breaching Creepers** (`CreeperBreachWalls` with hostile mob explosion immunity). If the world is at an earlier World Stage (e.g. Day 6), later time segments stay capped at the highest Horde Phase unlocked for that World Age.
 
 ### 4.3 Ported Bloodmoon Visuals & No-Sleep Engine
 - **Deterministic Shared Clock + Override Sync (`BloodmoonManager`)**:

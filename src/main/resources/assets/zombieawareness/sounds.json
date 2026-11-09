@@ -21,5 +21,19 @@
 	  "zombieawareness:investigate/zombie_investigate_2", 
 	  "zombieawareness:investigate/zombie_investigate_3"
     ]
+  },
+  "horde_roar": {
+    "category": "hostile",
+    "subtitle": "zombieawareness.subtitle.horde_roar",
+    "sounds": [
+      {
+        "name": "zombieawareness:horde_roar_1",
+        "attenuation_distance": 128
+      },
+      {
+        "name": "zombieawareness:horde_roar_2",
+        "attenuation_distance": 128
+      }
+    ]
   }
 }

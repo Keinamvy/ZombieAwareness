@@ -3,6 +3,8 @@
   "package": "com.corosus.zombieawareness.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
+    "CreeperAccessor",
+    "FireBlockAccessor",
     "MixinDedicatedServer",
     "MixinEntitySerialization",
     "MixinExplosion",
@@ -16,10 +18,13 @@
     "MixinRecomputePath",
     "MixinServerLevel_playSeededSound",
     "MixinServerPlayerGameMode",
+    "MixinServerPlayerSleep",
     "MixinTargettingFabric"
   ],
   "client": [
-    "MixinIntegratedServer"
+    "MixinIntegratedServer",
+    "client.MixinFogRenderer",
+    "client.MixinSkyRenderer"
   ],
   "injectors": {
     "defaultRequire": 1

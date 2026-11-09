@@ -12,6 +12,13 @@
 
 ## Global Constraints
 
+- **Orchestration & Execution Split**:
+  - **Flash Subagents (`Model: "flash"`, Medium/High effort)** execute all code implementation and wiring tasks (Tasks 1, 2, 3 in parallel, followed by Task 4 Step 1 wiring & pre-prod test harness implementation).
+  - **Main Agent (Coordinator)** personally performs the final verification phase (Task 4 Steps 2–5):
+    1. Run `./gradlew.bat test build testmodJar --no-daemon` to verify all JUnit 5 unit tests (`CoroConfigRegistryTest`, `ZAUtilUnitTest`, `ZDayProgressionTest`, `ChunkHeatAndBloodmoonTest`, `NightmareStageGateTest`) and both output jars (`zombieawareness-fabric-26.3-1.13.1.jar` and `zombieawareness-testmod-26.3-1.13.1.jar`).
+    2. Run **Graphify** across `src` (`graphify-out/graph.json`, `GRAPH_REPORT.md`, `graph.html`) and verify graph health (`0` import cycles, `0` dangling/missing edges, all communities connected cleanly) **before** running the final server pre-prod test.
+    3. Stage and run the real Fabric `26.3` dedicated server (`fabric-server-mc.26.3-loader.0.20.1-launcher.1.1.2.jar`) and verify all 8 Pre-Prod Server Test Stages pass (`=== ZA PREPROD SERVER TEST REPORT: 8/8 PASSED ===`) with exit code `0`.
+    4. Prepare the git repository cleanly on branch `26.3-fabric` (no untracked scratch artifacts, clean `git status`, verified output JAR in `build/libs/zombieawareness-fabric-26.3-1.13.1.jar`) ready for GitHub pushing, and only then emit `<!-- GOAL_COMPLETE -->`.
 - **Java & Toolchain**: Compile with JDK 25 (`org.gradle.java.home=C:/Users/Keinamvy/Documents/jdk-25.0.5+8`) and Minecraft `26.3` official unobfuscated mappings.
 - **Zero Empty-Server Progression**: `ZDayProgressionManager` MUST NOT advance `activePlayTicks` when `playerCount == 0` unless an admin test override (`forcedWorldDay`) is explicitly set.
 - **Non-Overlapping Parallel File Boundaries**: Tasks 1, 2, and 3 MUST ONLY create/modify the files listed in their respective `Files:` blocks so parallel subagents do not collide.
@@ -190,13 +197,49 @@
 - Modify: `src/main/resources/zombieawareness.mixins_fabric.json`
 - Modify: `src/testmod/java/com/corosus/zombieawareness/testmod/ZAPreProdTestMod.java`
 
-- [ ] **Step 1: Wire Tasks 1, 2, and 3 into `ZombieAwareness`, `ZAUtil`, `ZombieAwarenessFabric`, `MixinMob`, `MixinLivingEntity`, and `zombieawareness.mixins_fabric.json`**
+- [ ] **Step 1 (Flash Subagent): Wire Tasks 1, 2, and 3 into `ZombieAwareness`, `ZAUtil`, `ZombieAwarenessFabric`, `MixinMob`, `MixinLivingEntity`, `zombieawareness.mixins_fabric.json`, and expand `ZAPreProdTestMod.java` to 8 Pre-Prod Server Test Stages**
   - Register `ZAConfigZDay` in `ZombieAwareness.init()` and call `nightmareesm.init()`.
   - Register server tick listener (`ZDayProgressionManager.tickServer` + `BloodmoonManager.tickServer`), player join listener (`ServerPlayConnectionEvents.JOIN` → `ZDayProgressionManager.onPlayerJoin`), and `/zday` command (`CommandRegistrationCallback.EVENT` → `ZDayCommands::register`) in `ZombieAwarenessFabric.onInitialize()`.
   - Hook `ChunkHeatManager.onSoundPlayed` in `ZAUtil.hookSoundEvent` so TaCZ gunfire and explosions spawn 112-block sense nodes and accumulate Chunk Heat at Stage 2+.
+  - Upgrade `ChunkHeatManager.triggerSwarmWave` and `SoundRegistry` so:
+    1. `SoundRegistry` registers `"horde_roar"` (`zombieawareness:horde_roar`) backed by custom `.ogg` files (`horde_roar_1.ogg`, `horde_roar_2.ogg`), and `ChunkHeatManager.playHordeRoar` plays `SoundRegistry.get("horde_roar")` alongside vanilla roar layers.
+    2. `ChunkHeatManager.triggerSwarmWave` spawns a **Combined-Arms Mixed Horde** rather than only Zombies:
+       - Stages 2–4: 85% Zombies / Husks + 15% Spiders
+       - Stage 6+ (Day 14+): 65% Zombies (Frontline/Breachers) + 20% Web-Trapper Spiders (`SpiderShootWeb`) + 15% Suppression Skeletons (`NightmareSkeleton` / `SuperSkeleton`)
+       - Stage 10+ (Day 30+): 55% Zombies (Juggernauts/Sappers) + 20% Spiders + 15% Skeletons + 10% Wall-Breaching Creepers (`NightmareCreeper` / `CreeperBreachWalls`)
+       - Because Cross-Hostile Aggression & Creeper Friendly-Fire are disabled, Skeletons fire through the horde without triggering zombie infighting, Spiders web-pin the player, Creepers breach walls without killing the horde, and Zombies swarm in!
   - Hook `ZAUtil.spawnOrBuffSenseAtPos` in `MobDamageBlock` so breaching blocks emits noise that attracts nearby zombies to the breach point.
   - Hook `nightmareesm.LivingMobTick` and `nightmareesm.onFinalizeSpawn` in `MixinMob`, and `nightmareesm.onMobDamaged` in `MixinLivingEntity`.
+  - **Enforce Hostile Horde Unity (No Creeper Friendly Fire & No Cross-Hostile Aggression)**:
+    - Create helper `ZAUtil.isHostileMob(Entity entity)` (`return entity instanceof net.minecraft.world.entity.monster.Enemy || entity instanceof net.minecraft.world.entity.monster.Monster;`) and `ZAUtil.shouldBlockHostileFriendlyFireOrAggro(Entity attacker, Entity victim)` (`return isHostileMob(attacker) && isHostileMob(victim);`).
+    - In `MixinLivingEntity`:
+      - Inject `@At("HEAD")` cancellable on `hurtServer(ServerLevel level, DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir)`: if `(source.getEntity() instanceof Creeper || source.getDirectEntity() instanceof Creeper) && ZAUtil.isHostileMob((Entity)(Object)this)` OR `ZAUtil.shouldBlockHostileFriendlyFireOrAggro(source.getEntity(), (Entity)(Object)this)`, cancel and return `false` so creepers and skeleton arrows never damage or knock back fellow hostile mobs.
+      - Inject `@At("HEAD")` cancellable on `setLastHurtByMob(LivingEntity attacker, CallbackInfo ci)`: if `ZAUtil.shouldBlockHostileFriendlyFireOrAggro(attacker, (Entity)(Object)this)`, cancel `ci.cancel()` so a Zombie hit by a Skeleton arrow never records the Skeleton as its revenge target.
+    - In `MixinMob`:
+      - Inject `@At("HEAD")` cancellable on `setTarget(LivingEntity target, CallbackInfo ci)`: if `target != null && ZAUtil.shouldBlockHostileFriendlyFireOrAggro((Entity)(Object)this, target)`, cancel `ci.cancel()` so hostile mobs never target each other.
+    - Set `ESMConfig.AllowMonsterInfighting` default to `false`.
   - Add `MixinServerPlayerSleep`, `CreeperAccessor`, `FireBlockAccessor`, `MixinFogRenderer`, and `MixinSkyRenderer` to `zombieawareness.mixins_fabric.json`.
+  - Expand `ZAPreProdTestMod.java` to test all 8 stages (including verifying in Stage 7/8 that a Creeper explosion damage source does `0` damage to a Zombie, and a Zombie hit by a Skeleton / `zombie.setTarget(skeleton)` refuses cross-hostile targeting):
+    1. `[Test 1/8]` Mixin audit & registries (`MixinEnvironment.getCurrentEnvironment().audit()`)
+    2. `[Test 2/8]` Config files (`General.cfg`, `ClientConfig.cfg`, `ZDayProgression.cfg`, `MobLists.toml`, `nightmareesm-common.toml`)
+    3. `[Test 3/8]` Empty-server clock freeze (`activePlayTicks == 0` with 0 players) & 10-Stage unlock schedule (`Days 1..30`)
+    4. `[Test 4/8]` Multiplayer offline player catch-up dossier (`ZDayPlayerLedger` & `ZDayProgressionManager.buildCatchUpReportLines`) & `/zday status` / `/zday log` command execution
+    5. `[Test 5/8]` TaCZ gunshot (`tacz:gun_fire`) 112-block sense node, localized Chunk Heat accumulation (`>= 100`), directional Horde Roar, and Swarm Overrun wave spawn
+    6. `[Test 6/8]` Bloodmoon schedule (Day 8 night), forced Bloodmoon activation, and No-Sleep bed check
+    7. `[Test 7/8]` `NightmareESM` stage gating, Blackout Stalker torch breaking (`MobBreakLightSources`), Screamer Scout alert (`MobScreamerAlert`), and Juggernaut/Crawler attributes
+    8. `[Test 8/8]` `EntityScent` lifecycle & `Zombie` AI pathfinding to `EntityScent`
 
-- [ ] **Step 2: Expand `ZAPreProdTestMod.java` to 8 Pre-Prod Server Test Stages and run on the real Fabric 26.3 dedicated server**
-  Verify all 8 stages pass (`=== ZA PREPROD SERVER TEST REPORT: 8/8 PASSED ===`) on `fabric-server-mc.26.3-loader.0.20.1-launcher.1.1.2.jar` and commit.
+- [ ] **Step 2 (Main Agent Verification): Run JUnit 5 Suite & Gradle Build**
+  - Execute `.\gradlew.bat test build testmodJar --no-daemon` and fix any compilation/test issues until 100% green.
+
+- [ ] **Step 3 (Main Agent Verification): Run Graphify Codebase Audit Before Final Server Testing**
+  - Run the `graphify` pipeline on `src` to update `graphify-out/graph.json`, `graphify-out/GRAPH_REPORT.md`, and `graphify-out/graph.html`.
+  - Verify graph health (`0` dangling/missing edges, `0` import cycles) and confirm all new subsystems (`ZDayProgressionManager`, `BloodmoonManager`, `ChunkHeatManager`, `nightmareesm`) are properly connected to `ZombieAwareness`, `ZAUtil`, and `MixinMob`.
+
+- [ ] **Step 4 (Main Agent Verification): Execute Real Fabric 26.3 Server Pre-Prod Test Suite (8/8 Stages)**
+  - Copy `build/libs/zombieawareness-fabric-26.3-1.13.1.jar` and `build/libs/zombieawareness-testmod-26.3-1.13.1.jar` to `scratch/preprod-server/mods/`.
+  - Launch `fabric-server-mc.26.3-loader.0.20.1-launcher.1.1.2.jar` under JDK 25 and confirm `=== ZA PREPROD SERVER TEST REPORT: 8/8 PASSED ===` with exit code `0`.
+
+- [ ] **Step 5 (Main Agent Verification): Finalize Output JAR & Prepare Clean Git Repo for GitHub Push**
+  - Verify `build/libs/zombieawareness-fabric-26.3-1.13.1.jar` contains zero `testmod` classes and zero bundled external mod jars.
+  - Commit all changes cleanly on branch `26.3-fabric` and verify `git status` is 100% clean.

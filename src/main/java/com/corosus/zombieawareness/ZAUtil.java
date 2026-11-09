@@ -7,6 +7,8 @@ import com.corosus.zombieawareness.config.ZAConfigFeatures;
 import com.corosus.zombieawareness.config.ZAConfigGeneral;
 import com.corosus.zombieawareness.config.ZAConfigPlayerLists;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -18,6 +20,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.skeleton.Skeleton;
 import net.minecraft.world.entity.monster.spider.Spider;
 import net.minecraft.world.entity.monster.zombie.Zombie;
@@ -244,6 +248,14 @@ public class ZAUtil {
     
 	public static boolean isEnemy(Entity ent, Entity targ) {
 		return isEnemy(ent, targ, false);
+	}
+
+	public static boolean isHostileMob(Entity entity) {
+		return entity instanceof Enemy || entity instanceof Monster;
+	}
+
+	public static boolean shouldBlockHostileFriendlyFireOrAggro(Entity attacker, Entity victim) {
+		return attacker != null && victim != null && isHostileMob(attacker) && isHostileMob(victim);
 	}
 	
     public static boolean isEnemy(Entity ent, Entity targ, boolean omniTarget) {
@@ -561,19 +573,17 @@ public class ZAUtil {
 
     public static void hookSoundEvent(SoundEvent sound, Level world, double x, double y, double z, float volume, float pitch) {
 
-		/*if (SoundsListsConfig.GENERAL.outputPlayedSoundsToConsole.get()) {
-			Player closestPlayer = getClosestPlayer(world, x, y, z, 5);
-			if (closestPlayer != null) {
-				System.out.println("sound heard: " + SoundProfileEntry.getSoundEventName(sound));
-			}
-		}*/
-
 		//TODO: TEMP DEBUG!!!
 		//listSoundProfiles.clear();
 
 		initSoundHookDataIfEmpty();
     	
     	if (world.isClientSide() || sound == null || !canSpawnTraceQuickCheck(world)) return;
+
+		Identifier soundId = sound.location();
+		if (world instanceof ServerLevel serverLevel && soundId != null) {
+			com.corosus.zombieawareness.heat.ChunkHeatManager.onSoundPlayed(serverLevel, x, y, z, soundId.getNamespace(), soundId.getPath());
+		}
 
 		String soundName = SoundProfileEntry.getSoundEventName(sound);
 		SoundProfileEntry entry = getSoundIDEntry(soundName);

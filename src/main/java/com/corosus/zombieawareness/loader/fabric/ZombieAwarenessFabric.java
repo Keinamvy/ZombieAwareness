@@ -2,10 +2,17 @@ package com.corosus.zombieawareness.loader.fabric;
 
 import com.corosus.zombieawareness.EntityScent;
 import com.corosus.zombieawareness.ZombieAwareness;
+import com.corosus.zombieawareness.bloodmoon.BloodmoonManager;
 import com.corosus.zombieawareness.config.MobListsConfig;
+import com.corosus.zombieawareness.heat.ChunkHeatManager;
+import com.corosus.zombieawareness.zday.ZDayCommands;
+import com.corosus.zombieawareness.zday.ZDayProgressionManager;
 import fuzs.forgeconfigapiport.fabric.api.v5.ConfigRegistry;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -13,6 +20,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.Entity;
@@ -60,14 +68,33 @@ public class ZombieAwarenessFabric extends ZombieAwareness implements ModInitial
 
 	@Override
 	public void onInitialize() {
-		ServerLifecycleEvents.SERVER_STARTED.register((minecraftServer) -> {
-			ZombieAwarenessFabric.minecraftServer = minecraftServer;
+		ServerLifecycleEvents.SERVER_STARTED.register((server) -> {
+			ZombieAwarenessFabric.minecraftServer = server;
+		});
+
+		ServerLifecycleEvents.SERVER_STARTING.register(ZDayProgressionManager::initServer);
+
+		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			ZDayProgressionManager.tickServer(server);
+			ServerLevel overworld = server.overworld();
+			if (overworld != null) {
+				BloodmoonManager.tickServer(overworld);
+				ChunkHeatManager.tickServer(overworld);
+			}
+		});
+
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			ZDayProgressionManager.onPlayerJoin(handler.getPlayer());
+		});
+
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+			ZDayCommands.register(dispatcher);
 		});
 	}
 
 	@Override
 	public PlayerList getPlayerList() {
-		return minecraftServer.getPlayerList();
+		return minecraftServer != null ? minecraftServer.getPlayerList() : null;
 	}
 
 	@Override

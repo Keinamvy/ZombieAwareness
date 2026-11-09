@@ -64,6 +64,7 @@ public abstract class ZombieAwareness
         CoroConfigRegistry.instance().addConfigFile(MODID, new ZAConfigClient());
         CoroConfigRegistry.instance().addConfigFile(MODID, new ZAConfigFeatures());
         CoroConfigRegistry.instance().addConfigFile(MODID, new ZAConfigPlayerLists());
+        CoroConfigRegistry.instance().addConfigFile(MODID, new ZAConfigZDay());
         generateEntityTickList();
 
     }
@@ -211,6 +212,8 @@ public abstract class ZombieAwareness
         register("alert");
         register("target");
         register("investigate");
+        register("horde_roar");
+        com.nll.nightmareesm.nightmareesm.init();
     }
 
     public SoundEvent register(String name) {
