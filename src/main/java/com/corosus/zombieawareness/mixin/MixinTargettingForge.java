@@ -12,17 +12,15 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Optional;
-import java.util.function.Function;
-import java.util.function.Predicate;
 
 @Mixin(StartAttacking.class)
 public abstract class MixinTargettingForge {
 
-    @Inject(method = "lambda$create$1",
+    @Inject(method = "lambda$create$3",
             at = @At(value = "HEAD"))
-    private static void hook(Predicate canAttack, Function targetFinder, MemoryAccessor memoryAccessor, MemoryAccessor memoryAccessor2, ServerLevel serverLevel, Mob mob, long l, CallbackInfoReturnable<Boolean> cir) {
-        Optional<? extends LivingEntity> optional = (Optional)targetFinder.apply(mob);
-        if (!optional.isEmpty()) {
+    private static void hook(StartAttacking.StartAttackingCondition canAttack, StartAttacking.TargetFinder targetFinder, MemoryAccessor memoryAccessor, MemoryAccessor memoryAccessor2, ServerLevel serverLevel, Mob mob, long l, CallbackInfoReturnable<Boolean> cir) {
+        Optional<? extends LivingEntity> optional = targetFinder.get(serverLevel, mob);
+        if (optional.isPresent()) {
             LivingEntity livingEntity = optional.get();
             ZAUtil.test(mob, livingEntity);
             if (mob.canAttack(livingEntity)) {

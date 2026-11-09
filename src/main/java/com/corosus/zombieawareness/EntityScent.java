@@ -4,15 +4,18 @@ import com.corosus.coroutil.util.CU;
 import com.corosus.zombieawareness.config.ZAConfigClient;
 import com.corosus.zombieawareness.config.ZAConfigGeneral;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 
-public class EntityScent extends Entity/* implements IEntityAdditionalSpawnData*/ {
+public class EntityScent extends Entity {
 
 	/**
 	 * 
@@ -40,14 +43,19 @@ public class EntityScent extends Entity/* implements IEntityAdditionalSpawnData*
     }
 
     @Override
-    protected void defineSynchedData() {
-    	this.getEntityData().define(STRENGTH_PEAK, Integer.valueOf(0));
-    	this.getEntityData().define(AGE, Integer.valueOf(0));
-    	this.getEntityData().define(TYPE, Byte.valueOf((byte) 0));
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+    	builder.define(STRENGTH_PEAK, Integer.valueOf(0));
+    	builder.define(AGE, Integer.valueOf(0));
+    	builder.define(TYPE, Byte.valueOf((byte) 0));
+    }
+
+    @Override
+    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
+        return false;
     }
     
     @Override
-    public boolean canBeCollidedWith() {
+    public boolean canBeCollidedWith(Entity other) {
     	return false;
     }
 
@@ -100,8 +108,6 @@ public class EntityScent extends Entity/* implements IEntityAdditionalSpawnData*
     @Override
     public void tick() {
     	
-    	//TODO: if raining, age smell sense much faster
-    	
     	int age = this.getEntityData().get(AGE);
         int decayRate = level().isRaining() && level().canSeeSky(blockPosition()) ? 3 : 1;
         age -= decayRate;
@@ -110,26 +116,24 @@ public class EntityScent extends Entity/* implements IEntityAdditionalSpawnData*
     	this.getEntityData().set(AGE, age);
         
         if(!level().isClientSide() && age <= 0) {
-        	this.kill();
+        	this.discard();
         }
 
         boolean scentDebug = ZAConfigClient.client_debugSensesVisual;
         if (scentDebug) {
 	        if (level().isClientSide()) {
-	        	if (level().getGameTime()/*+this.getEntityId()*/ % 5 == 0) {
+	        	if (level().getGameTime() % 5 == 0) {
 	        		for (int i = 0; i < getStrengthScaled() / 10; i++) {
-	        			double range = 1D;
 	        			double x = getX() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
 	        			double y = getY() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
 	        			double z = getZ() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
 	        			if (getSenseType() == 0) {
-	        				level().addParticle(ParticleTypes.HEART, true, x, y, z, 0, 0, 0);
+	        				level().addParticle(ParticleTypes.HEART, true, true, x, y, z, 0, 0, 0);
                         } else if (getSenseType() == 1) {
-                            level().addParticle(ParticleTypes.NOTE, true, x, y, z, 0, 0, 0);
+                            level().addParticle(ParticleTypes.NOTE, true, true, x, y, z, 0, 0, 0);
                         } else if (getSenseType() == 2) {
-                            level().addParticle(ParticleTypes.ANGRY_VILLAGER, true, x, y, z, 0, 0, 0);
+                            level().addParticle(ParticleTypes.ANGRY_VILLAGER, true, true, x, y, z, 0, 0, 0);
                         }
-	        			
 	        		}
 	        	}
 	        }
@@ -145,32 +149,16 @@ public class EntityScent extends Entity/* implements IEntityAdditionalSpawnData*
     }
 
     @Override
-    protected void addAdditionalSaveData(CompoundTag var1) {
+    protected void addAdditionalSaveData(ValueOutput var1) {
         var1.putInt("age", this.getEntityData().get(AGE));
         var1.putInt("strengthpeak", this.getEntityData().get(STRENGTH_PEAK));
         var1.putInt("type", getSenseType());
     }
 
     @Override
-    protected void readAdditionalSaveData(CompoundTag var1) {
-    	this.getEntityData().set(AGE, var1.getInt("age"));
-    	this.getEntityData().set(STRENGTH_PEAK, var1.getInt("strengthpeak"));
-    	this.getEntityData().set(TYPE, var1.getByte("type"));
-        //type = var1.getInt("type");
+    protected void readAdditionalSaveData(ValueInput var1) {
+    	this.getEntityData().set(AGE, var1.getIntOr("age", 0));
+    	this.getEntityData().set(STRENGTH_PEAK, var1.getIntOr("strengthpeak", 0));
+    	this.getEntityData().set(TYPE, var1.getByteOr("type", (byte) 0));
     }
-
-	/*@Override
-	public void writeSpawnData(FriendlyByteBuf data) {
-		data.writeInt(this.getSenseType());
-	}
-
-	@Override
-	public void readSpawnData(FriendlyByteBuf data) {
-		type = data.readInt();
-	}*/
-
-    /*@Override
-    public Packet<ClientGamePacketListener> getAddEntityPacket() {
-        return NetworkHooks.getEntitySpawningPacket(this);
-    }*/
 }

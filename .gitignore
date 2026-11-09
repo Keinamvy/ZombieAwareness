@@ -30,3 +30,5 @@ run
 *.class
 *.war
 *.ear
+.superpowers/
+

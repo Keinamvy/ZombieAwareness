@@ -2,11 +2,11 @@ package com.corosus.zombieawareness;
 
 import com.corosus.modconfig.CoroConfigRegistry;
 import com.corosus.zombieawareness.config.*;
-import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.Entity;
@@ -18,7 +18,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -36,7 +35,8 @@ public abstract class ZombieAwareness
         return instance;
     }
 
-    public static ResourceLocation SENSE_NAME = new ResourceLocation(ZombieAwareness.MODID, "scent");
+    public static Identifier SENSE_NAME = Identifier.fromNamespaceAndPath(ZombieAwareness.MODID, "scent");
+    public static ResourceKey<EntityType<?>> SENSE_KEY = ResourceKey.create(Registries.ENTITY_TYPE, SENSE_NAME);
     public static EntityType<EntityScent> SENSE;
 
     public static HashMap<UUID, CompoundTag> entityData = new HashMap<>();
@@ -44,13 +44,7 @@ public abstract class ZombieAwareness
     public static HashMap<String, Boolean> unitTest = new HashMap<>();
 
     public static void unitTest(String num) {
-        /*if (!unitTest.containsKey(num)) {
-            for (int i = 1; i <= 16; i++) {
-                System.out.println(i + ": " + unitTest.containsKey(String.valueOf(i)));
-            }
-            System.out.println(num + " - count: " + unitTest.size() + " of 16");
-        }
-        unitTest.put(num, true);*/
+        unitTest.put(num, true);
     }
 
     public CompoundTag getPersistentData(Entity ent) {
@@ -69,37 +63,14 @@ public abstract class ZombieAwareness
         CoroConfigRegistry.instance().addConfigFile(MODID, new ZAConfigGeneral());
         CoroConfigRegistry.instance().addConfigFile(MODID, new ZAConfigClient());
         CoroConfigRegistry.instance().addConfigFile(MODID, new ZAConfigFeatures());
-        //ConfigMod.addConfigFile(MODID, new ZAConfigMobLists());
-
-        //ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SoundsListsConfig.CONFIG, ZombieAwarenessMod.MODID + File.separator + "SoundLists.toml");
         CoroConfigRegistry.instance().addConfigFile(MODID, new ZAConfigPlayerLists());
-        //ConfigMod.addConfigFile(MODID, new ZAConfigSpawning());
-        //ZombieAwarenessMod.generateEntityTickList();
-        //required to make forge tell us when our mods reload, and we then tell ModConfig about it so it does its thing
-        //modBus.addListener(this::onReload);
         generateEntityTickList();
-        //generateSoundList();
 
     }
 
     public abstract PlayerList getPlayerList();
 
     public abstract boolean isModInstalled(String modID);
-
-
-
-    /*@SubscribeEvent
-    public void onLoad(final ModConfigEvent.Loading configEvent) {
-        if (configEvent.getConfig().getFileName().contains("MobLists.toml")) {
-            //System.out.println("ZombieAwarenessMod.generateEntityTickList();");
-
-        }
-
-        if (configEvent.getConfig().getFileName().contains("SoundLists.toml")) {
-
-        }
-    }*/
-
 
     public static void serverStarting() {
         clearConfigCache();
@@ -139,18 +110,15 @@ public abstract class ZombieAwareness
 
         boolean result = false;
         if (canConfigEntity(ent)) {
-            //if (!pregen) config.load();
             boolean canProcess = getDefaultForEntity(ent);
             try {
                 //prevent crash for case where mod entity can be null or blank
                 if (entName != null && !entName.equals("")) {
-                    //result = config.get(configCategory, entName, canProcess).getBoolean(canProcess);
                     result = canProcess;
                 }
             } catch (Exception ex) {
                 ex.printStackTrace();
             }
-            //if (!pregen) config.save();
             ZAUtil.lookupTickableEntitiesCache.put(ent, result);
         }
 
@@ -166,10 +134,6 @@ public abstract class ZombieAwareness
      */
     public static boolean canEntityBeProcessedOverride(Entity entity) {
         return true;
-		/*boolean result = false;
-		if (entity instanceof IEntityOwnable) {
-			if (entity.
-		}*/
     }
 
     /**
@@ -179,7 +143,6 @@ public abstract class ZombieAwareness
      * @return
      */
     public static boolean canConfigEntity(EntityType ent) {
-        //return MonsterEntity.class.isAssignableFrom(ent.getClass()) || IMob.class.isAssignableFrom(ent.getClass());
         return ent.getCategory() == MobCategory.MONSTER;
     }
 
@@ -228,27 +191,20 @@ public abstract class ZombieAwareness
      */
     public static void generateEntityTickList() {
         for(Map.Entry<ResourceKey<EntityType<?>>, EntityType<?>> entry : BuiltInRegistries.ENTITY_TYPE.entrySet()) {
-            //calling canProcessEntity fills the lists
             boolean tickEnt = canConfigEntity(entry.getValue());
             if (tickEnt) {
-                MobListsConfig.enhanceableMobsList.add(entry.getKey().location().toString());
+                MobListsConfig.enhanceableMobsList.add(entry.getKey().identifier().toString());
             }
         }
-        //MobListsConfig.GENERAL.enhanceableMobs.set(MobListsConfig.enhanceableMobsList);
-        //System.out.println(MobListsConfig.enhanceableMobsList);
     }
 
     public static void generateSoundList() {
         for(Map.Entry<ResourceKey<SoundEvent>, SoundEvent> entry : BuiltInRegistries.SOUND_EVENT.entrySet()) {
-            //calling canProcessEntity fills the lists
-            //boolean tickEnt = canConfigEntity(entry.getValue());
             if (true) {
-                SoundsListsConfig.allSoundsInGameList.add(entry.getKey().location().toString());
+                SoundsListsConfig.allSoundsInGameList.add(entry.getKey().identifier().toString());
             }
         }
         SoundsListsConfig.GENERAL.allSoundsInGame.set(SoundsListsConfig.allSoundsInGameList);
-        //System.out.println(SoundsListsConfig.allSoundsInGameList);
-        //System.out.println("asdasd");
     }
 
     public void init() {
@@ -258,7 +214,7 @@ public abstract class ZombieAwareness
     }
 
     public SoundEvent register(String name) {
-        SoundEvent event = SoundEvent.createVariableRangeEvent(new ResourceLocation(ZombieAwareness.MODID, name));
+        SoundEvent event = SoundEvent.createVariableRangeEvent(Identifier.fromNamespaceAndPath(ZombieAwareness.MODID, name));
         lookupStringToEvent.put(name, event);
         return event;
     }

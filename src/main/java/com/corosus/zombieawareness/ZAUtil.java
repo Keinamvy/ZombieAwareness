@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.profiling.Profiler;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -17,9 +18,9 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.monster.Skeleton;
-import net.minecraft.world.entity.monster.Spider;
-import net.minecraft.world.entity.monster.Zombie;
+import net.minecraft.world.entity.monster.skeleton.Skeleton;
+import net.minecraft.world.entity.monster.spider.Spider;
+import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
@@ -128,7 +129,7 @@ public class ZAUtil {
 		if (ZAConfigFeatures.noisyPistons) listSoundProfiles.add(new SoundProfileEntry(SoundEvents.PISTON_EXTEND, 2D, 5).setMaxDistToSpawnFromPlayer(24));
 
 		//not used traditionally, looked up directly
-		listSoundProfiles.add(new SoundProfileEntry(SoundEvents.GENERIC_EXPLODE, 10D).setMaxDistToSpawnFromPlayer(24));
+		listSoundProfiles.add(new SoundProfileEntry(SoundEvents.GENERIC_EXPLODE.value(), 10D).setMaxDistToSpawnFromPlayer(24));
 	}
 
 	public static void addSoundIntegerEntry(SoundProfileEntry entry) {
@@ -213,7 +214,7 @@ public class ZAUtil {
 	}
 
 	public static boolean isMobSpeedBosted(Mob ent) {
-		return ZombieAwareness.instance().getPersistentData(ent).getBoolean(SPEED_BOOST_TAG);
+		return ZombieAwareness.instance().getPersistentData(ent).getBooleanOr(SPEED_BOOST_TAG, false);
 		//return ent.getPersistentData().getBoolean(SPEED_BOOST_TAG);
 	}
 	
@@ -223,8 +224,8 @@ public class ZAUtil {
 			if (ent.isBaby()) {
 				randBoost *= -1;
 			}
-			AttributeModifier speedBoostModifier = new AttributeModifier(CoroUtilAttributes.SPEED_BOOST_UUID, "ZA speed boost", randBoost, AttributeModifier.Operation.MULTIPLY_BASE);
-            if (!ent.getAttribute(Attributes.MOVEMENT_SPEED).hasModifier(speedBoostModifier)) {
+			AttributeModifier speedBoostModifier = new AttributeModifier(CoroUtilAttributes.SPEED_BOOST_ID, randBoost, AttributeModifier.Operation.ADD_MULTIPLIED_BASE);
+            if (!ent.getAttribute(Attributes.MOVEMENT_SPEED).hasModifier(CoroUtilAttributes.SPEED_BOOST_ID)) {
 				ZombieAwareness.dbg("boosting zombie speed to " + randBoost);
                 ent.getAttribute(Attributes.MOVEMENT_SPEED).addPermanentModifier(speedBoostModifier);
 				ZombieAwareness.instance().getPersistentData(ent).putBoolean(SPEED_BOOST_TAG, true);
@@ -283,7 +284,7 @@ public class ZAUtil {
 
     	if (ZAConfigGeneral.debugConsoleSuperDetailed) ZombieAwareness.dbg("ZA DBG: Ticking: " + ent);
 
-		long lastActionTime = ZombieAwareness.instance().getPersistentData(ent).getLong(ZA_LAST_ACTION);
+		long lastActionTime = ZombieAwareness.instance().getPersistentData(ent).getLongOr(ZA_LAST_ACTION, 0L);
 		if (lastActionTime > 0 && ent.level().getGameTime() - ZAConfigGeneral.tickCooldownBetweenPathfinds < lastActionTime) return;
 
 		//if (ent.getNoActionTime() <= 40) return;
@@ -344,7 +345,7 @@ public class ZAUtil {
     
     public static boolean ai_FindLightSource(Mob ent) {
     	
-    	if (ent.level().isDay()) return false;
+    	if (ent.level().isBrightOutside()) return false;
 
 		boolean forceOn = false;
     	
@@ -386,10 +387,10 @@ public class ZAUtil {
 							if (canSeePos) {
 								ZombieAwareness.dbg("try path to light source - " + rX + ", " + rY + ", " + rZ);
 								//if (ent.getNavigation().moveTo(rX, rY, rZ, 1)) {
-								ent.level().getProfiler().push("zombieawareness_pathfind");
+								Profiler.get().push("zombieawareness_pathfind");
 								boolean pathFound = CoroUtilPath.tryMoveToXYZLongDist(ent, rX, rY, rZ, 1);
 								//pathFound = ent.getNavigation().moveTo(rX, rY, rZ, 1);
-								ent.level().getProfiler().pop();
+								Profiler.get().pop();
 								if (pathFound) {
 									ZombieAwareness.dbg("node count: " + ent.getNavigation().getPath().getNodeCount());
 
@@ -418,12 +419,12 @@ public class ZAUtil {
         if(var3 != null) {
         	if (includeWaypoints || var3.getSenseType() != 2) {
 				//if (ent.getNavigation().moveTo(var3, 1)) {
-				ent.level().getProfiler().push("zombieawareness_pathfind");
+				Profiler.get().push("zombieawareness_pathfind");
 				boolean pathFound = CoroUtilPath.tryMoveToEntityLivingLongDist(ent, var3, 1);
 				//for (int i = 0; i < 1000; i++) {
 				//pathFound = ent.getNavigation().moveTo(var3, 1);
 				//}
-				ent.level().getProfiler().pop();
+				Profiler.get().pop();
         		if (pathFound) {
 					markPerformedPathing(ent);
         			ZombieAwareness.dbg("ai_FindSense call, type: " + ((EntityScent)var3).getSenseType() + " - " + ent.getName() + " -> " + var3.position());
@@ -724,7 +725,7 @@ public class ZAUtil {
     	BlockState state = world.getBlockState(pos);
     	//iirc circuits check was to prevent senses spawning on pressure plates and triggering them, but there should be better ways to stop that...
 		//might be redundant since AABB and canTriggerWalking and canBeCollidedWith fix
-        if (state.getPistonPushReaction() == PushReaction.DESTROY && (!(state.getBlock() instanceof ButtonBlock) && !(state.getBlock() instanceof LeverBlock))) {
+        if (state.getPistonPushReaction() == PushReaction.POPPED && (!(state.getBlock() instanceof ButtonBlock) && !(state.getBlock() instanceof LeverBlock))) {
             return false;
         }
         return true;
@@ -885,7 +886,7 @@ public class ZAUtil {
 	public static boolean isZombieAwarenessActive(Level world) {
 		if (world == null) return false;
 		if (ZAConfigGeneral.daysBeforeFeaturesActivate <= 0) return true;
-		double day = ((double)world.getDayTime() / CoroUtilWorldTime.getDayLength());
+		double day = ((double)world.getDefaultClockTime() / CoroUtilWorldTime.getDayLength());
 		if (day >= ZAConfigGeneral.daysBeforeFeaturesActivate) {
 			return true;
 		} else {
