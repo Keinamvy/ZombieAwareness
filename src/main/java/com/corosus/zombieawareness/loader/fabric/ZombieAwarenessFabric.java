@@ -3,6 +3,7 @@ package com.corosus.zombieawareness.loader.fabric;
 import com.corosus.zombieawareness.EntityScent;
 import com.corosus.zombieawareness.ZombieAwareness;
 import com.corosus.zombieawareness.bloodmoon.BloodmoonManager;
+import com.corosus.zombieawareness.compat.TaCZIntegration;
 import com.corosus.zombieawareness.config.MobListsConfig;
 import com.corosus.zombieawareness.heat.ChunkHeatManager;
 import com.corosus.zombieawareness.zday.ZDayCommands;
@@ -68,6 +69,8 @@ public class ZombieAwarenessFabric extends ZombieAwareness implements ModInitial
 
 	@Override
 	public void onInitialize() {
+		TaCZIntegration.registerEventsIfLoaded();
+
 		ServerLifecycleEvents.SERVER_STARTED.register((server) -> {
 			ZombieAwarenessFabric.minecraftServer = server;
 		});

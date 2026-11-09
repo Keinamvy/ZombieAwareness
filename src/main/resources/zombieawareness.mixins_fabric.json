@@ -19,6 +19,7 @@
     "MixinServerLevel_playSeededSound",
     "MixinServerPlayerGameMode",
     "MixinServerPlayerSleep",
+    "MixinTaCZSoundManager",
     "MixinTargettingFabric"
   ],
   "client": [

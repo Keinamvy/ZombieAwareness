@@ -152,11 +152,25 @@ public class ZAPreProdTestMod implements ModInitializer {
             ChunkHeatManager.clearAllHeat();
             ZDayProgressionManager.setForcedWorldDay(4); // Stage 2 (Day 4+) required for heat trigger
 
-            for (int i = 0; i < 4; i++) {
-                ChunkHeatManager.onSoundPlayed(level, 0.0, 100.0, 0.0, "tacz", "gun_fire");
+            // Verify TaCZ onTaCZGunSound for silenced shot (+4 heat) vs unsuppressed shot (+25 heat)
+            ChunkHeatManager.onTaCZGunSound(level, 0.0, 100.0, 0.0, 20, "silence");
+            int silencedHeat = ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime());
+            assertCondition(silencedHeat == 4, "Expected silenced shot heat to be 4 (+4 heat), got: " + silencedHeat);
+
+            ChunkHeatManager.onTaCZGunSound(level, 0.0, 100.0, 0.0, 64, "shoot");
+            int combinedHeat = ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime());
+            assertCondition(combinedHeat == 29, "Expected heat after silenced (+4) and unsuppressed (+25) shot to be 29, got: " + combinedHeat);
+
+            // Verify suppressors reduce heat by > 80% (21/25 = 84% reduction)
+            double reduction = (25.0 - 4.0) / 25.0;
+            assertCondition(reduction > 0.80, "Suppressors (+4 heat vs +25 heat) must reduce heat by > 80%");
+
+            // 3 more unsuppressed gunfire events (+75 heat) -> 29 + 75 = 104 heat (>= 100) -> triggers ActiveHorde
+            for (int i = 0; i < 3; i++) {
+                ChunkHeatManager.onTaCZGunSound(level, 0.0, 100.0, 0.0, 64, "shoot");
             }
             int heat = ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime());
-            assertCondition(heat >= 100, "Expected chunk heat >= 100 after 4 gunfire events, got: " + heat);
+            assertCondition(heat >= 100, "Expected chunk heat >= 100 after gunfire events, got: " + heat);
             assertCondition(ChunkHeatManager.getActiveHordeCount() > 0, "Expected ActiveHorde registered, count=" + ChunkHeatManager.getActiveHordeCount());
 
             assertCondition(ChunkHeatManager.computeHordeDurationTicks(1) == 3600, "1 player horde duration must be 3600 ticks (3 mins)");

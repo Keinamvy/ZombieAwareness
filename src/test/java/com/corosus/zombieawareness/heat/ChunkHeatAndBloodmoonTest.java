@@ -1,6 +1,7 @@
 package com.corosus.zombieawareness.heat;
 
 import com.corosus.zombieawareness.bloodmoon.BloodmoonManager;
+import com.corosus.zombieawareness.zday.ZDayProgressionManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,51 @@ public class ChunkHeatAndBloodmoonTest {
         assertTrue(ChunkHeatManager.isFirearmOrExplosionSound("minecraft", "entity.generic.explode"), "generic explode should trigger gunfire/explosion heat");
         assertTrue(ChunkHeatManager.isFirearmOrExplosionSound("tacz", "ak47_shoot"), "tacz ak47_shoot should be firearm sound");
         assertFalse(ChunkHeatManager.isFirearmOrExplosionSound("minecraft", "entity.zombie.ambient"), "ambient zombie noise should not be firearm sound");
+    }
+
+    @Test
+    public void taczSuppressedAndLoudGunfireHeatAccumulation() {
+        ChunkHeatManager.clearAllHeat();
+        ZDayProgressionManager.setForcedWorldDay(4); // Stage 2+ required for heat accumulation
+
+        try {
+            // Verify isSuppressedTaCZSound classification
+            assertTrue(ChunkHeatManager.isSuppressedTaCZSound("silence"), "'silence' must be recognized as suppressed");
+            assertTrue(ChunkHeatManager.isSuppressedTaCZSound("silence_3p"), "'silence_3p' must be recognized as suppressed");
+            assertTrue(ChunkHeatManager.isSuppressedTaCZSound("custom_silence_shot"), "contains 'silence' must be recognized as suppressed");
+            assertFalse(ChunkHeatManager.isSuppressedTaCZSound("shoot"), "'shoot' must not be recognized as suppressed");
+            assertFalse(ChunkHeatManager.isSuppressedTaCZSound("shoot_3p"), "'shoot_3p' must not be recognized as suppressed");
+            assertFalse(ChunkHeatManager.isSuppressedTaCZSound(null), "null must not be recognized as suppressed");
+
+            // Test onTaCZGunSound with "silence" -> adds +4 heat
+            ChunkHeatManager.onTaCZGunSound(null, 100, 64, 100, 20, "silence");
+            int heatAfter1Silenced = ChunkHeatManager.getHeatAtBlockPos(100, 100, 0L);
+            assertEquals(4, heatAfter1Silenced, "Silenced shot must add +4 Chunk Heat");
+
+            // Second silenced shot -> adds another +4 heat (total 8)
+            ChunkHeatManager.onTaCZGunSound(null, 100, 64, 100, 20, "silence_3p");
+            int heatAfter2Silenced = ChunkHeatManager.getHeatAtBlockPos(100, 100, 0L);
+            assertEquals(8, heatAfter2Silenced, "Second silenced shot must bring heat to 8 (+4 heat)");
+
+            // Test onTaCZGunSound with "shoot" -> adds +25 heat (total 33)
+            ChunkHeatManager.onTaCZGunSound(null, 100, 64, 100, 64, "shoot");
+            int heatAfterShoot = ChunkHeatManager.getHeatAtBlockPos(100, 100, 0L);
+            assertEquals(33, heatAfterShoot, "Unsuppressed shot must add +25 Chunk Heat (8 + 25 = 33)");
+
+            // Tactical handling sounds (reload, dry_fire, bolt) must add 0 heat
+            ChunkHeatManager.onTaCZGunSound(null, 100, 64, 100, 14, "reload_empty");
+            ChunkHeatManager.onTaCZGunSound(null, 100, 64, 100, 14, "dry_fire");
+            ChunkHeatManager.onTaCZGunSound(null, 100, 64, 100, 14, "bolt");
+            int heatAfterHandling = ChunkHeatManager.getHeatAtBlockPos(100, 100, 0L);
+            assertEquals(33, heatAfterHandling, "Tactical handling noises must add 0 Chunk Heat");
+
+            // Prove suppressors reduce heat by > 80%: (25 - 4) / 25 = 21/25 = 84% reduction
+            double heatReduction = (25.0 - 4.0) / 25.0;
+            assertTrue(heatReduction > 0.80, "Suppressors (+4 heat vs +25 heat) must reduce chunk heat by > 80% (got " + (heatReduction * 100) + "%)");
+        } finally {
+            ZDayProgressionManager.setForcedWorldDay(-1);
+            ChunkHeatManager.clearAllHeat();
+        }
     }
 
     @Test

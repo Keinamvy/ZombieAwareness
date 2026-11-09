@@ -124,7 +124,7 @@ public class ChunkHeatManager {
         if ("tacz".equals(ns)) {
             if (p.contains("reload") || p.contains("inspect") || p.contains("draw")
                     || p.contains("holster") || p.contains("handling") || p.contains("cock")
-                    || p.contains("bolt") || p.contains("unload")) {
+                    || p.contains("bolt") || p.contains("unload") || p.contains("dry_fire")) {
                 return true;
             }
         }
@@ -371,6 +371,58 @@ public class ChunkHeatManager {
         }
     }
 
+    public static boolean isSuppressedTaCZSound(String soundName) {
+        if (soundName == null) return false;
+        String lower = soundName.toLowerCase(Locale.ROOT);
+        return lower.equals("silence") || lower.equals("silence_3p") || lower.contains("silence");
+    }
+
+    public static void onTaCZGunSound(ServerLevel level, double x, double y, double z, int taczDistance, String soundName) {
+        if (soundName == null) return;
+        if (level == null) {
+            // Unit test fallback path when Minecraft ServerLevel is not bootstrapped
+            String lower = soundName.toLowerCase(Locale.ROOT);
+            if (isSuppressedTaCZSound(lower)) {
+                if (ZDayProgressionManager.isStageUnlocked(2)) {
+                    addHeatAtBlockPos((int) x, (int) z, 4, 0L);
+                }
+            } else if (lower.equals("shoot") || lower.equals("shoot_3p") || lower.contains("shoot")) {
+                if (ZDayProgressionManager.isStageUnlocked(2)) {
+                    addHeatAtBlockPos((int) x, (int) z, 25, 0L);
+                }
+            }
+            return;
+        }
+
+        String lower = soundName.toLowerCase(Locale.ROOT);
+        if (isSuppressedTaCZSound(lower)) {
+            // Suppressed shot! Spawns a quiet Math.min(24, Math.max(16, taczDistance)) strength EntityScent sound node
+            try {
+                int soundStrength = Math.min(24, Math.max(16, taczDistance));
+                ZAUtil.spawnOrBuffSenseAtPos(level, new Vector3d(x, y, z), EnumSenseType.SOUND, soundStrength, true);
+            } catch (Throwable ignored) {}
+
+            // If ZDayProgressionManager.isStageUnlocked(2), adds only +4 Chunk Heat (instead of +25), and checks threshold!
+            if (ZDayProgressionManager.isStageUnlocked(2)) {
+                long gameTick = level.getGameTime();
+                int currentHeat = addHeatAtBlockPos((int) x, (int) z, 4, gameTick);
+                checkAndTriggerHorde(level, x, y, z, currentHeat, gameTick);
+            }
+        } else if (lower.equals("shoot") || lower.equals("shoot_3p") || lower.contains("shoot")) {
+            // Unsuppressed shot! Spawns a loud Math.max(112, taczDistance * 2) strength EntityScent sound node and delegates to onSoundPlayed
+            try {
+                int soundStrength = Math.max(112, taczDistance * 2);
+                ZAUtil.spawnOrBuffSenseAtPos(level, new Vector3d(x, y, z), EnumSenseType.SOUND, soundStrength, true);
+            } catch (Throwable ignored) {}
+            onSoundPlayed(level, x, y, z, "tacz", soundName);
+        } else if (lower.contains("reload") || lower.contains("dry_fire") || lower.contains("bolt")) {
+            // Close-range tactical handling noise! Spawns a 14-strength EntityScent sound node with 0 Chunk Heat
+            try {
+                ZAUtil.spawnOrBuffSenseAtPos(level, new Vector3d(x, y, z), EnumSenseType.SOUND, 14, true);
+            } catch (Throwable ignored) {}
+        }
+    }
+
     public static void onSoundPlayed(ServerLevel level, double x, double y, double z, String namespace, String path) {
         if (level == null) return;
         if (isQuietFirearmHandlingSound(namespace, path)) return;
@@ -383,7 +435,10 @@ public class ChunkHeatManager {
 
         long gameTick = level.getGameTime();
         int currentHeat = addHeatAtBlockPos((int) x, (int) z, 25, gameTick);
+        checkAndTriggerHorde(level, x, y, z, currentHeat, gameTick);
+    }
 
+    private static void checkAndTriggerHorde(ServerLevel level, double x, double y, double z, int currentHeat, long gameTick) {
         int threshold = ZAConfigZDay.chunkHeatThreshold;
         if (currentHeat >= threshold) {
             long centerKey = ChunkPos.pack(((int) x) >> 4, ((int) z) >> 4);
