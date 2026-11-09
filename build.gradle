@@ -1,0 +1,112 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version '1.19.4'
+	id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = "${project.archives_base_name}-fabric"
+}
+
+sourceSets {
+	main {
+		java {
+			exclude "com/corosus/${project.mod_id}/api/forge/**"
+			exclude "com/corosus/${project.mod_id}/loader/forge/**"
+		}
+		resources {
+			srcDir 'src/generated/resources'
+		}
+	}
+	testmod {
+		compileClasspath += main.compileClasspath + main.output
+		runtimeClasspath += main.runtimeClasspath + main.output
+	}
+}
+
+repositories {
+	maven {
+		url = "https://maven.fabricmc.net/"
+	}
+	mavenCentral()
+	flatDir {
+		dirs 'libs'
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+	compileOnly files("libs/ForgeConfigAPIPort-v26.3.1-mc26.3.x-Fabric.jar")
+	compileOnly files("libs/core-3.8.4.jar")
+	compileOnly files("libs/toml-3.8.4.jar")
+	runtimeOnly files("libs/ForgeConfigAPIPort-v26.3.1-mc26.3.x-Fabric.jar")
+	runtimeOnly files("libs/core-3.8.4.jar")
+	runtimeOnly files("libs/toml-3.8.4.jar")
+
+	testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+loom {
+	accessWidenerPath = file("src/main/resources/${project.mod_id}.accesswidener")
+}
+
+processResources {
+	inputs.property "version", project.version
+
+	filesMatching("fabric.mod.json") {
+		expand "mod_id": project.mod_id, "version": project.version, "mod_name": project.mod_name, "mod_description": project.mod_description, "mod_authors": project.mod_authors, "mod_license": project.mod_license
+	}
+
+	exclude("META-INF/mods.toml")
+	exclude("META-INF/accesstransformer.cfg")
+}
+
+tasks.named('processTestmodResources', ProcessResources).configure {
+	inputs.property "version", project.version
+	filesMatching("fabric.mod.json") {
+		expand "version": project.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+test {
+	useJUnitPlatform()
+}
+
+jar {
+	from("LICENSE") {
+		rename { "${it}_${project.base.archivesName.get()}" }
+	}
+}
+
+tasks.register('testmodJar', Jar) {
+	group = 'build'
+	archiveBaseName.set("${project.archives_base_name}-testmod")
+	archiveVersion.set(project.version.toString())
+	from(sourceSets.testmod.output)
+	dependsOn tasks.named('testmodClasses')
+}
+
+publishing {
+	publications {
+		mavenJava(MavenPublication) {
+			from components.java
+		}
+	}
+	repositories {
+	}
+}
