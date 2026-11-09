@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "zombieawareness_testmod",
+  "version": "${version}",
+  "name": "Zombie Awareness Pre-Prod Test Mod",
+  "description": "Companion test mod for automated pre-prod server verification of Zombie Awareness on Fabric 26.3",
+  "authors": [
+    "Corosus"
+  ],
+  "license": "All Rights Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.corosus.zombieawareness.testmod.ZAPreProdTestMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "zombieawareness": "*",
+    "fabric-api": "*",
+    "minecraft": "~26.3-",
+    "java": ">=25"
+  }
+}

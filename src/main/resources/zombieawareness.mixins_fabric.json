@@ -6,7 +6,6 @@
     "MixinDedicatedServer",
     "MixinEntitySerialization",
     "MixinExplosion",
-    "MixinIntegratedServer",
     "MixinLevelEvent",
     "MixinLivingEntity",
     "MixinMob",
@@ -18,6 +17,9 @@
     "MixinServerLevel_playSeededSound",
     "MixinServerPlayerGameMode",
     "MixinTargettingFabric"
+  ],
+  "client": [
+    "MixinIntegratedServer"
   ],
   "injectors": {
     "defaultRequire": 1
