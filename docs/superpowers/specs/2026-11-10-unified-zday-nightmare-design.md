@@ -48,9 +48,12 @@ Players using firearm mods like **TaCZ (Timeless and Classics Zero)** and atmosp
 
 ---
 
-## 3. Staggered World-Age Unlock Schedule
+## 3. Staggered World-Age Unlock Schedule & Active-Player Clock
 
-World Day is computed as `int worldDay = (int) (overworld.getDefaultClockTime() / 24000L) + 1;` (so a brand-new world at tick `0` starts on **Day 1**). All day thresholds are configurable via `ZAConfigZDay.java` (registered in `CoroConfigRegistry`).
+- **Active-Player Apocalypse Clock (`activePlayTicks`)**:
+  - To prevent an empty multiplayer server (e.g., `pause-when-empty-seconds=0`) from advancing days while all players are offline, `ZDayProgressionManager` maintains `activePlayTicks` (persisted in `<world>/data/zombieawareness_zday_ledger.json`).
+  - `activePlayTicks` **only increments on server ticks when `server.getPlayerCount() > 0`** (or when online players skip the night by sleeping on a non-Bloodmoon night, which advances `activePlayTicks` to the next dawn boundary).
+  - Effective World Day is computed as `int worldDay = (int) (activePlayTicks / 24000L) + 1;` (so a brand-new world at `0` active ticks starts on **Day 1**). All day thresholds are configurable via `ZAConfigZDay.java` (registered in `CoroConfigRegistry`).
 
 | Stage | Unlock Day | Mechanic Name | Unlocked Gameplay & AI Behavior |
 | :---: | :---: | :--- | :--- |
