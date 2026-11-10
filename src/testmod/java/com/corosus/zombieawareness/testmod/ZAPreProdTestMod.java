@@ -356,10 +356,36 @@ public class ZAPreProdTestMod implements ModInitializer {
             long lastAction = ZombieAwareness.instance().getPersistentData(aiZombie).getLongOr(ZAUtil.ZA_LAST_ACTION, 0L);
             assertCondition(lastAction > 0L, "Zombie persistent data za_last_action was not updated");
 
+            // Monster Distress Scent & Throttle Verification
+            assertCondition(ZAUtil.trySpawnMonsterDistressScent(level, aiZombie, 4) == null, "Distress scent must not spawn at Stage 4");
+            ZAUtil.resetDistressScentThrottle();
+            EntityScent distressScent = ZAUtil.trySpawnMonsterDistressScent(level, aiZombie, 5);
+            assertCondition(distressScent != null, "Distress scent must spawn at Stage 5 for hostile mob");
+            assertCondition(distressScent.getStrengthPeak() == 80, "Stage 5 distress scent peak must be 80");
+            assertCondition(distressScent.getSenseType() == EnumSenseType.SCENT_BLOOD.ordinal(), "Distress scent primary node must be SCENT_BLOOD");
+            distressScent.discard();
+
+            // Aerial Horde Phantom Spawning & Entity Creation Verification
+            assertCondition(ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, 5), "Phantoms allowed in Phase 2 at Stage 5");
+            assertCondition(!ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, 4), "Phantoms disallowed at Stage 4");
+            assertCondition(!ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_1A_FAST_ZOMBIES, 5), "Phantoms disallowed in Phase 1A");
+            assertCondition(ChunkHeatManager.computePhantomSpawnY(64) == 80, "Phantom spawn Y must be ground + 16");
+            EntityType<?> phantomType = BuiltInRegistries.ENTITY_TYPE.getValue(Identifier.withDefaultNamespace("phantom"));
+            assertCondition(phantomType != null, "Phantom entity type must exist in BuiltInRegistries");
+            net.minecraft.world.entity.Entity phantomEntity = phantomType.create(level, EntitySpawnReason.EVENT);
+            assertCondition(phantomEntity != null, "Phantom entity must be instantiated successfully");
+            phantomEntity.discard();
+
+            // Horde Mob Loot Drop Reduction (80% drop reduction)
+            assertCondition(ZAUtil.shouldHordeMobDropLoot(false, 0.99f), "Non-horde mobs must always drop loot");
+            assertCondition(ZAUtil.shouldHordeMobDropLoot(true, 0.10f), "Horde mob with roll < 0.20 must drop loot");
+            assertCondition(!ZAUtil.shouldHordeMobDropLoot(true, 0.20f), "Horde mob with roll >= 0.20 must not drop loot (80% drop reduction)");
+            assertCondition(!ZAUtil.shouldHordeMobDropLoot(true, 0.50f), "Horde mob with roll >= 0.20 must not drop loot");
+
             targetScent.discard();
             aiZombie.discard();
             passed++;
-            LOGGER.info("[Test 8/10] PASS: EntityScent lifecycle and Zombie AI scent pathfinding verified.");
+            LOGGER.info("[Test 8/10] PASS: EntityScent lifecycle, distress scent, aerial phantoms, loot drop reduction, and Zombie AI pathfinding verified.");
 
             // Test 9/10: Directional Horde Cone Spawning (38-52m, ±40°), 360° Surround Siege, Apex Corrosion Phase 5, and Crimson Seal Lockdown
             LOGGER.info("[Test 9/10] Verifying Directional Cone Spawning, 360° Surround Siege, Apex Corrosion Phase 5, and Crimson Seal Portal Lockdown...");

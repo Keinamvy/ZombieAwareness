@@ -231,4 +231,41 @@ public class NightmareStageGateTest {
       assertEquals(20, com.corosus.zombieawareness.ZAUtil.computeArmorDurabilityShred(400));
       assertEquals(12, com.corosus.zombieawareness.ZAUtil.computeArmorDurabilityShred(100));
    }
+
+   @Test
+   @DisplayName("Monster distress scent gate/strength, phantom aerial horde support, and horde mob loot reduction")
+   void testMonsterDistressScentPhantomAerialHordeAndLootReductionStageGate() {
+      // 1. Monster Distress Scent Gate (Stage 5+) & Strength Scaling (80..140)
+      for (int stage = 0; stage <= 4; stage++) {
+         assertFalse(com.corosus.zombieawareness.ZAUtil.canSpawnMonsterDistressScent(stage));
+         assertEquals(0, com.corosus.zombieawareness.ZAUtil.computeMonsterDistressScentStrength(stage));
+      }
+      for (int stage = 5; stage <= 10; stage++) {
+         assertTrue(com.corosus.zombieawareness.ZAUtil.canSpawnMonsterDistressScent(stage));
+      }
+      assertEquals(80, com.corosus.zombieawareness.ZAUtil.computeMonsterDistressScentStrength(5));
+      assertEquals(140, com.corosus.zombieawareness.ZAUtil.computeMonsterDistressScentStrength(10));
+      assertEquals(140, com.corosus.zombieawareness.ZAUtil.computeMonsterDistressScentStrength(12));
+
+      // 2. Horde Phantom Aerial Spawning Gate & Y Offset
+      for (int stage = 1; stage <= 4; stage++) {
+         for (com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase phase : com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.values()) {
+            assertFalse(com.corosus.zombieawareness.heat.ChunkHeatManager.canHordeSpawnPhantoms(phase, stage));
+         }
+      }
+      assertFalse(com.corosus.zombieawareness.heat.ChunkHeatManager.canHordeSpawnPhantoms(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_1A_FAST_ZOMBIES, 5));
+      assertFalse(com.corosus.zombieawareness.heat.ChunkHeatManager.canHordeSpawnPhantoms(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, 5));
+      assertTrue(com.corosus.zombieawareness.heat.ChunkHeatManager.canHordeSpawnPhantoms(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, 5));
+      assertTrue(com.corosus.zombieawareness.heat.ChunkHeatManager.canHordeSpawnPhantoms(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, 7));
+      assertTrue(com.corosus.zombieawareness.heat.ChunkHeatManager.canHordeSpawnPhantoms(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, 9));
+      assertTrue(com.corosus.zombieawareness.heat.ChunkHeatManager.canHordeSpawnPhantoms(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION, 10));
+
+      assertEquals(80, com.corosus.zombieawareness.heat.ChunkHeatManager.computePhantomSpawnY(64));
+
+      // 3. 80% Drop Reduction for Horde Mobs
+      assertTrue(com.corosus.zombieawareness.ZAUtil.shouldHordeMobDropLoot(false, 0.99f));
+      assertTrue(com.corosus.zombieawareness.ZAUtil.shouldHordeMobDropLoot(true, 0.10f));
+      assertFalse(com.corosus.zombieawareness.ZAUtil.shouldHordeMobDropLoot(true, 0.20f));
+      assertFalse(com.corosus.zombieawareness.ZAUtil.shouldHordeMobDropLoot(true, 0.50f));
+   }
 }

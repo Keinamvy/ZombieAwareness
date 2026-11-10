@@ -120,8 +120,22 @@ public abstract class MixinLivingEntity {
     @Inject(method = "die", at = @At("HEAD"))
     public void za$onEntityDie(DamageSource source, CallbackInfo ci) {
         LivingEntity self = (LivingEntity)(Object)this;
-        if (!self.level().isClientSide() && self instanceof net.minecraft.server.level.ServerPlayer sp && self.level() instanceof ServerLevel serverLevel) {
-            com.corosus.zombieawareness.heat.ChunkHeatManager.onPlayerDeath(serverLevel, sp.getUUID(), sp.blockPosition(), serverLevel.getGameTime());
+        if (!self.level().isClientSide() && self.level() instanceof ServerLevel serverLevel) {
+            if (self instanceof net.minecraft.server.level.ServerPlayer sp) {
+                com.corosus.zombieawareness.heat.ChunkHeatManager.onPlayerDeath(serverLevel, sp.getUUID(), sp.blockPosition(), serverLevel.getGameTime());
+            }
+            if (ZAUtil.isHostileMob(self)) {
+                ZAUtil.trySpawnMonsterDistressScent(serverLevel, self, com.corosus.zombieawareness.zday.ZDayProgressionManager.getCurrentStage().getStageNumber());
+            }
+        }
+    }
+
+    @Inject(method = "dropAllDeathLoot", at = @At("HEAD"), cancellable = true)
+    private void za$reduceHordeMobLootDrops(ServerLevel level, DamageSource damageSource, CallbackInfo ci) {
+        LivingEntity self = (LivingEntity)(Object)this;
+        boolean isHordeMob = self.entityTags().contains("za_horde_mob");
+        if (isHordeMob && !ZAUtil.shouldHordeMobDropLoot(true, level.getRandom().nextFloat())) {
+            ci.cancel();
         }
     }
 

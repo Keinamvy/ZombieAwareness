@@ -77,6 +77,9 @@ public class ZAUtil {
     public static final float APEX_ARMOR_BYPASS_RATIO = 0.40f; // Bypasses 40% of player armor
     public static final float NECROTIC_REGEN_EFFICIENCY = 0.50f; // Reduces healing/regeneration efficiency by 50%
     public static final long NECROTIC_TRAUMA_DURATION_TICKS = 160L; // 8 seconds
+    public static final float HORDE_MOB_LOOT_DROP_CHANCE = 0.20f; // Only 20% of horde mobs drop loot (80% drop reduction)
+
+    private static long lastDistressScentTick = -9999L;
 
     private static final Map<UUID, Long> necroticTraumaUntilTick = new ConcurrentHashMap<>();
 
@@ -1052,5 +1055,40 @@ public class ZAUtil {
             }
         }
         return totalShredded;
+    }
+
+    public static void resetDistressScentThrottle() {
+        lastDistressScentTick = -9999L;
+    }
+
+    public static boolean canSpawnMonsterDistressScent(int worldStageNum) {
+        return worldStageNum >= 5;
+    }
+
+    public static int computeMonsterDistressScentStrength(int worldStageNum) {
+        return worldStageNum < 5 ? 0 : Math.min(140, 80 + (worldStageNum - 5) * 12);
+    }
+
+    public static EntityScent trySpawnMonsterDistressScent(ServerLevel level, LivingEntity deadMob, int worldStageNum) {
+        if (level == null || deadMob == null || !isHostileMob(deadMob) || !canSpawnMonsterDistressScent(worldStageNum)) {
+            return null;
+        }
+        long gameTime = level.getGameTime();
+        if (gameTime >= lastDistressScentTick && gameTime - lastDistressScentTick < 40L) {
+            return null;
+        }
+        lastDistressScentTick = gameTime;
+        int strength = computeMonsterDistressScentStrength(worldStageNum);
+        Vector3d pos = new Vector3d(deadMob.getX(), deadMob.getY(), deadMob.getZ());
+        EntityScent scent = spawnOrBuffSenseAtPos(level, pos, EnumSenseType.SCENT_BLOOD, strength, true);
+        spawnOrBuffSenseAtPos(level, pos, EnumSenseType.SOUND, strength, true);
+        return scent;
+    }
+
+    public static boolean shouldHordeMobDropLoot(boolean isHordeMob, float randomZeroToOne) {
+        if (!isHordeMob) {
+            return true;
+        }
+        return randomZeroToOne < HORDE_MOB_LOOT_DROP_CHANCE;
     }
 }

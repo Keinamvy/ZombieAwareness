@@ -617,4 +617,64 @@ public class ChunkHeatAndBloodmoonTest {
         assertEquals(-38.0, surroundOpposite[0], 0.01, "Surround mode max angle (180°) must place mobs behind player (x = -38)");
         assertEquals(0.0, surroundOpposite[1], 0.01);
     }
+
+    @Test
+    public void monsterDistressScentPhantomHordeSpawningAndLootReduction() {
+        // 1. Monster Distress Scent Gate & Strength Scaling
+        for (int stage = 0; stage <= 4; stage++) {
+            assertFalse(ZAUtil.canSpawnMonsterDistressScent(stage), "Stage " + stage + " must not spawn monster distress scent");
+            assertEquals(0, ZAUtil.computeMonsterDistressScentStrength(stage), "Stage " + stage + " distress scent strength must be 0");
+        }
+        for (int stage = 5; stage <= 10; stage++) {
+            assertTrue(ZAUtil.canSpawnMonsterDistressScent(stage), "Stage " + stage + " must allow monster distress scent");
+        }
+        assertEquals(80, ZAUtil.computeMonsterDistressScentStrength(5), "Stage 5 distress scent strength must be 80");
+        assertEquals(92, ZAUtil.computeMonsterDistressScentStrength(6), "Stage 6 distress scent strength must be 92");
+        assertEquals(104, ZAUtil.computeMonsterDistressScentStrength(7), "Stage 7 distress scent strength must be 104");
+        assertEquals(116, ZAUtil.computeMonsterDistressScentStrength(8), "Stage 8 distress scent strength must be 116");
+        assertEquals(128, ZAUtil.computeMonsterDistressScentStrength(9), "Stage 9 distress scent strength must be 128");
+        assertEquals(140, ZAUtil.computeMonsterDistressScentStrength(10), "Stage 10 distress scent strength must be 140");
+        assertEquals(140, ZAUtil.computeMonsterDistressScentStrength(11), "Stage >10 distress scent strength must cap at 140");
+
+        // 2. Horde Phantom Aerial Spawning Gate & Y Offset
+        // Stages 1-4 must disallow phantoms for all phases
+        for (int stage = 1; stage <= 4; stage++) {
+            for (ChunkHeatManager.HordePhase phase : ChunkHeatManager.HordePhase.values()) {
+                assertFalse(ChunkHeatManager.canHordeSpawnPhantoms(phase, stage),
+                        "Stage " + stage + " phase " + phase + " must not spawn Phantoms");
+            }
+        }
+        // Early phases (1A, 1B) must disallow phantoms even at Stage 5+
+        for (int stage = 5; stage <= 10; stage++) {
+            assertFalse(ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_1A_FAST_ZOMBIES, stage));
+            assertFalse(ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, stage));
+            // Later phases (Phase 2..5) allow phantoms
+            assertTrue(ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, stage));
+            assertTrue(ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, stage));
+            assertTrue(ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, stage));
+            assertTrue(ChunkHeatManager.canHordeSpawnPhantoms(ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION, stage));
+        }
+
+        // Phantom spawn Y calculation
+        assertEquals(80, ChunkHeatManager.computePhantomSpawnY(64), "Phantom spawn Y must be ground + 16 (64 + 16 = 80)");
+        assertEquals(116, ChunkHeatManager.computePhantomSpawnY(100), "Phantom spawn Y must be ground + 16 (100 + 16 = 116)");
+
+        // 3. 80% Drop Reduction for Horde Mobs
+        // Non-horde mob: always drops loot (100%)
+        assertTrue(ZAUtil.shouldHordeMobDropLoot(false, 0.0f));
+        assertTrue(ZAUtil.shouldHordeMobDropLoot(false, 0.19f));
+        assertTrue(ZAUtil.shouldHordeMobDropLoot(false, 0.20f));
+        assertTrue(ZAUtil.shouldHordeMobDropLoot(false, 0.50f));
+        assertTrue(ZAUtil.shouldHordeMobDropLoot(false, 0.99f));
+
+        // Horde mob: only drops loot if roll < 0.20f (20% drop chance, 80% drop reduction)
+        assertTrue(ZAUtil.shouldHordeMobDropLoot(true, 0.0f));
+        assertTrue(ZAUtil.shouldHordeMobDropLoot(true, 0.10f));
+        assertTrue(ZAUtil.shouldHordeMobDropLoot(true, 0.199f));
+        assertFalse(ZAUtil.shouldHordeMobDropLoot(true, 0.20f), "Roll of 0.20f must not drop loot");
+        assertFalse(ZAUtil.shouldHordeMobDropLoot(true, 0.21f), "Roll of 0.21f must not drop loot");
+        assertFalse(ZAUtil.shouldHordeMobDropLoot(true, 0.50f), "Roll of 0.50f must not drop loot");
+        assertFalse(ZAUtil.shouldHordeMobDropLoot(true, 0.80f), "Roll of 0.80f must not drop loot");
+        assertFalse(ZAUtil.shouldHordeMobDropLoot(true, 0.99f), "Roll of 0.99f must not drop loot");
+    }
 }

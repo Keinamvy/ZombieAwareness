@@ -25,6 +25,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.monster.Phantom;
 import net.minecraft.world.entity.monster.skeleton.AbstractSkeleton;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.level.ChunkPos;
@@ -167,6 +168,17 @@ public class ChunkHeatManager {
         }
 
         return raw.ordinal() > maxAllowed.ordinal() ? maxAllowed : raw;
+    }
+
+    public static boolean canHordeSpawnPhantoms(HordePhase phase, int worldStageNum) {
+        return worldStageNum >= 5 && (phase == HordePhase.PHASE_2_BREACHERS_SKELETONS
+                || phase == HordePhase.PHASE_3_JUGGERNAUTS_WITCHES
+                || phase == HordePhase.PHASE_4_CLIMAX_SAPPERS
+                || phase == HordePhase.PHASE_5_APEX_CORROSION);
+    }
+
+    public static int computePhantomSpawnY(int groundSpawnY) {
+        return groundSpawnY + 16;
     }
 
     public static boolean canTriggerHordeForGroup(BlockPos triggerPos, Collection<UUID> groupPlayerIds) {
@@ -696,7 +708,9 @@ public class ChunkHeatManager {
                         }
                     }
                     case PHASE_2_BREACHERS_SKELETONS -> {
-                        if (roll < 0.60f) {
+                        if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
+                            mob = createMobById(level, "phantom");
+                        } else if (roll < 0.60f) {
                             Zombie z = new Zombie(level);
                             new com.nll.nightmareesm.GiveRandomPickaxe(z);
                             mob = z;
@@ -707,7 +721,9 @@ public class ChunkHeatManager {
                         }
                     }
                     case PHASE_3_JUGGERNAUTS_WITCHES -> {
-                        if (roll < 0.55f) {
+                        if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
+                            mob = createMobById(level, "phantom");
+                        } else if (roll < 0.55f) {
                             Zombie z = new Zombie(level);
                             if (rand.nextBoolean()) {
                                 com.nll.nightmareesm.nightmareesm.applyJuggernautLoadout(z);
@@ -725,7 +741,9 @@ public class ChunkHeatManager {
                         }
                     }
                     case PHASE_4_CLIMAX_SAPPERS -> {
-                        if (roll < 0.50f) {
+                        if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
+                            mob = createMobById(level, "phantom");
+                        } else if (roll < 0.50f) {
                             Zombie z = new Zombie(level);
                             if (rand.nextBoolean()) {
                                 com.nll.nightmareesm.nightmareesm.applyJuggernautLoadout(z);
@@ -742,7 +760,9 @@ public class ChunkHeatManager {
                         }
                     }
                     case PHASE_5_APEX_CORROSION -> {
-                        if (roll < 0.40f) {
+                        if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
+                            mob = createMobById(level, "phantom");
+                        } else if (roll < 0.40f) {
                             Zombie z = new Zombie(level);
                             if (rand.nextBoolean()) {
                                 com.nll.nightmareesm.nightmareesm.applyJuggernautLoadout(z);
@@ -773,14 +793,34 @@ public class ChunkHeatManager {
                     if (phase == HordePhase.PHASE_5_APEX_CORROSION) {
                         mob.addTag("za_apex_corrosive");
                     }
-                    if (mob instanceof Zombie || mob instanceof AbstractSkeleton) {
+                    boolean isPhantom = (mob instanceof Phantom);
+                    if (mob instanceof Zombie || mob instanceof AbstractSkeleton || isPhantom) {
                         mob.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 7200, 0, false, false));
                     }
-                    mob.setPos(targetX, spawnY, targetZ);
+                    double actualY = isPhantom ? computePhantomSpawnY(spawnY) : spawnY;
+                    mob.setPos(targetX, actualY, targetZ);
                     try {
                         mob.finalizeSpawn(level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.EVENT, null);
                     } catch (Throwable ignored) {}
                     level.addFreshEntity(mob);
+                    if (isPhantom) {
+                        ServerPlayer nearestSurvival = null;
+                        double nearestDistSq = 96.0 * 96.0;
+                        if (level.players() != null) {
+                            for (ServerPlayer player : level.players()) {
+                                if (player != null && player.isAlive() && !player.isDeadOrDying() && !player.isSpectator() && !player.isCreative()) {
+                                    double dSq = player.distanceToSqr(mob);
+                                    if (dSq <= nearestDistSq) {
+                                        nearestDistSq = dSq;
+                                        nearestSurvival = player;
+                                    }
+                                }
+                            }
+                        }
+                        if (nearestSurvival != null) {
+                            mob.setTarget(nearestSurvival);
+                        }
+                    }
                     try {
                         CoroUtilPath.tryMoveToXYZLongDist(mob, center.getX(), center.getY(), center.getZ(), 1.0);
                     } catch (Throwable ignored) {}
