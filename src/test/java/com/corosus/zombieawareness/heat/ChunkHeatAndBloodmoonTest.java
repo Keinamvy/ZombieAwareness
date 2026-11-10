@@ -484,4 +484,54 @@ public class ChunkHeatAndBloodmoonTest {
         assertFalse(ChunkHeatManager.isPlayerLockedByHordeOrBloodmoon(otherPlayer, distantPos, false),
                 "Distant uninvolved player should not be locked");
     }
+
+    @Test
+    public void deathGroupForgivenessFullWipeAndPartialSquadDownscale() {
+        ChunkHeatManager.clearAllHeat();
+        UUID uuidSolo = UUID.randomUUID();
+        BlockPos center = new BlockPos(0, 64, 0);
+
+        // 1. Solo Player Death (Full Wipe)
+        assertTrue(ChunkHeatManager.tryRegisterHordeForGroup(center, Collections.singleton(uuidSolo), 1, 8, 4),
+                "Should register horde for solo player");
+        assertEquals(1, ChunkHeatManager.getActiveHordeCount(), "Active horde count should be 1");
+
+        boolean soloWipeResult = ChunkHeatManager.onPlayerDeath(null, uuidSolo, center, 1000L);
+        assertTrue(soloWipeResult, "Solo player death must trigger full group wipe forgiveness");
+        assertEquals(0, ChunkHeatManager.getActiveHordeCount(), "Horde count must be 0 after full wipe");
+        assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(Collections.singleton(uuidSolo), 1000L + 3500L),
+                "Solo player must have 3-minute / 3600-tick corpse-run grace period");
+        assertFalse(ChunkHeatManager.isGroupInPostHordeBreather(Collections.singleton(uuidSolo), 1000L + 3601L),
+                "Corpse-run grace period should expire after 3600 ticks");
+
+        // 2. Multi-Player Squad Partial Death -> Then Full Wipe
+        UUID uuidP1 = UUID.randomUUID();
+        UUID uuidP2 = UUID.randomUUID();
+        assertTrue(ChunkHeatManager.tryRegisterHordeForGroup(center, List.of(uuidP1, uuidP2), 2, 10, 4),
+                "Should register horde for 2-player squad");
+        assertEquals(1, ChunkHeatManager.getActiveHordeCount(), "Active horde count should be 1");
+
+        ChunkHeatManager.ActiveHorde squadHorde = ChunkHeatManager.getActiveHordes().get(0);
+        assertEquals(10, squadHorde.subWaveCount, "Initial subWaveCount should be 10");
+
+        // UUID_P1 dies at tick 2000
+        boolean p1DeathResult = ChunkHeatManager.onPlayerDeath(null, uuidP1, center, 2000L);
+        assertFalse(p1DeathResult, "Partial squad death must return false (horde continues for survivors)");
+        assertEquals(1, ChunkHeatManager.getActiveHordeCount(), "Horde must remain active for surviving squadmate");
+        assertFalse(squadHorde.targetGroupPlayerIds.contains(uuidP1), "Dead player UUID_P1 must be removed from targetGroupPlayerIds");
+        assertTrue(squadHorde.targetGroupPlayerIds.contains(uuidP2), "Surviving player UUID_P2 must remain targeted");
+        assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(Collections.singleton(uuidP1), 5000L),
+                "UUID_P1 must have corpse-run grace period active at tick 5000");
+        assertTrue(squadHorde.subWaveCount < 10, "subWaveCount must be scaled down after squadmate death");
+        assertEquals(5, squadHorde.subWaveCount, "subWaveCount should scale down to 5 (ceil(10 * 1/2))");
+
+        // UUID_P2 dies at tick 2100 (Full Group Wipe)
+        boolean p2DeathResult = ChunkHeatManager.onPlayerDeath(null, uuidP2, center, 2100L);
+        assertTrue(p2DeathResult, "Final squadmate death must trigger full group wipe forgiveness");
+        assertEquals(0, ChunkHeatManager.getActiveHordeCount(), "Horde count must be 0 after full squad wipe");
+        assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(Collections.singleton(uuidP1), 5000L),
+                "UUID_P1 must still have corpse-run grace period");
+        assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(Collections.singleton(uuidP2), 5000L),
+                "UUID_P2 must have corpse-run grace period");
+    }
 }

@@ -31,6 +31,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
@@ -52,6 +53,7 @@ public class ChunkHeatManager {
 
     public static final int MAX_CHUNK_HEAT = 150;
     public static final long POST_HORDE_BREATHER_TICKS = 1800L;
+    public static final long CORPSE_RUN_GRACE_TICKS = 3600L;
     public static final double GROUP_CLUSTER_RADIUS = 96.0;
     private static final Map<Long, HeatEntry> heatMap = new ConcurrentHashMap<>();
     private static final List<ActiveHorde> activeHordes = new CopyOnWriteArrayList<>();
@@ -68,8 +70,9 @@ public class ChunkHeatManager {
     public static class ActiveHorde {
         public BlockPos center;
         public final Set<UUID> targetGroupPlayerIds;
+        public final Set<UUID> originalGroupPlayerIds;
         public final int totalDurationTicks;
-        public final int subWaveCount;
+        public int subWaveCount;
         public final int worldStageNum;
         public final double approachAngleRad;
         public int elapsedTicks;
@@ -78,9 +81,16 @@ public class ChunkHeatManager {
 
         public ActiveHorde(BlockPos center, Set<UUID> targetGroupPlayerIds, int totalDurationTicks, int subWaveCount, int worldStageNum, double approachAngleRad) {
             this.center = center;
-            this.targetGroupPlayerIds = (targetGroupPlayerIds != null)
-                    ? Collections.unmodifiableSet(new HashSet<>(targetGroupPlayerIds))
-                    : Collections.emptySet();
+            Set<UUID> targetSet = ConcurrentHashMap.newKeySet();
+            if (targetGroupPlayerIds != null) {
+                for (UUID id : targetGroupPlayerIds) {
+                    if (id != null) {
+                        targetSet.add(id);
+                    }
+                }
+            }
+            this.targetGroupPlayerIds = targetSet;
+            this.originalGroupPlayerIds = Collections.unmodifiableSet(new HashSet<>(targetSet));
             this.totalDurationTicks = totalDurationTicks;
             this.subWaveCount = subWaveCount;
             this.worldStageNum = worldStageNum;
@@ -237,12 +247,84 @@ public class ChunkHeatManager {
         activeHordes.clear();
     }
 
+    public static int disperseHordeMobsAround(ServerLevel level, BlockPos center, double radius, double discardFraction) {
+        if (level == null || center == null) return 0;
+        double radiusSq = radius * radius;
+        List<Mob> mobs = new ArrayList<>();
+        for (Entity entity : level.getAllEntities()) {
+            if (entity instanceof Mob m && m.isAlive() && m.entityTags().contains("za_horde_mob")) {
+                if (m.distanceToSqr(center.getX() + 0.5, center.getY() + 0.5, center.getZ() + 0.5) <= radiusSq) {
+                    mobs.add(m);
+                }
+            }
+        }
+        if (mobs.isEmpty()) return 0;
+        int keepCount = (int) Math.floor(mobs.size() * (1.0 - discardFraction));
+        int discardTarget = mobs.size() - keepCount;
+        int discarded = 0;
+        for (int i = 0; i < mobs.size() && discarded < discardTarget; i++) {
+            Mob mob = mobs.get(i);
+            if (mob != null && mob.isAlive()) {
+                mob.discard();
+                discarded++;
+            }
+        }
+        return discarded;
+    }
+
+    public static boolean onPlayerDeath(ServerLevel level, UUID deadPlayerUuid, BlockPos deathPos, long currentTick) {
+        for (ActiveHorde horde : activeHordes) {
+            boolean matched = (deadPlayerUuid != null && horde.targetGroupPlayerIds.contains(deadPlayerUuid))
+                    || (horde.targetGroupPlayerIds.isEmpty() && deathPos != null && horde.center != null
+                        && deathPos.distSqr(horde.center) <= GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS);
+            if (!matched) {
+                continue;
+            }
+
+            int prevCount = Math.max(1, horde.targetGroupPlayerIds.size());
+            if (deadPlayerUuid != null) {
+                horde.targetGroupPlayerIds.remove(deadPlayerUuid);
+                playerBreatherUntilTick.put(deadPlayerUuid, currentTick + CORPSE_RUN_GRACE_TICKS);
+            }
+
+            if (horde.targetGroupPlayerIds.isEmpty()) {
+                activeHordes.remove(horde);
+                for (UUID id : horde.originalGroupPlayerIds) {
+                    if (id != null) {
+                        playerBreatherUntilTick.put(id, currentTick + CORPSE_RUN_GRACE_TICKS);
+                    }
+                }
+                BlockPos center = horde.center != null ? horde.center : deathPos;
+                if (center != null) {
+                    resetHeatAround(center.getX(), center.getZ(), currentTick);
+                }
+                if (level != null) {
+                    if (center != null) {
+                        disperseHordeMobsAround(level, center, GROUP_CLUSTER_RADIUS, 0.80);
+                    }
+                    if (level.players() != null) {
+                        for (ServerPlayer player : level.players()) {
+                            if (player != null && horde.originalGroupPlayerIds.contains(player.getUUID())) {
+                                player.sendSystemMessage(Component.literal("§7§o[!] Having overrun your position, the horde disperses into the shadows..."));
+                            }
+                        }
+                    }
+                }
+                return true;
+            } else {
+                horde.subWaveCount = Math.max(4, (int) Math.ceil(horde.subWaveCount * ((double) horde.targetGroupPlayerIds.size() / (double) prevCount)));
+                return false;
+            }
+        }
+        return false;
+    }
+
     public static void markGroupPostHordeBreather(Collection<UUID> groupPlayerIds, long currentTick) {
         if (groupPlayerIds == null || groupPlayerIds.isEmpty()) return;
         long until = currentTick + POST_HORDE_BREATHER_TICKS;
         for (UUID id : groupPlayerIds) {
             if (id != null) {
-                playerBreatherUntilTick.put(id, until);
+                playerBreatherUntilTick.compute(id, (k, v) -> v == null ? until : Math.max(v, until));
             }
         }
     }
@@ -644,13 +726,24 @@ public class ChunkHeatManager {
                 double maxRangeSq = 128.0 * 128.0;
 
                 for (ServerPlayer player : overworld.players()) {
-                    if (player != null && player.isAlive() && horde.targetGroupPlayerIds.contains(player.getUUID())) {
+                    if (player != null && horde.targetGroupPlayerIds.contains(player.getUUID())) {
+                        if (!player.isAlive() || player.isDeadOrDying()) {
+                            boolean wiped = onPlayerDeath(overworld, player.getUUID(), player.blockPosition(), currentTick);
+                            if (wiped) {
+                                break;
+                            }
+                            continue;
+                        }
                         double distSq = player.distanceToSqr(horde.center.getX() + 0.5, horde.center.getY() + 0.5, horde.center.getZ() + 0.5);
                         if (distSq <= maxRangeSq && distSq < closestDistSq) {
                             closestDistSq = distSq;
                             closestPlayer = player;
                         }
                     }
+                }
+
+                if (!activeHordes.contains(horde)) {
+                    continue;
                 }
 
                 if (closestPlayer != null) {

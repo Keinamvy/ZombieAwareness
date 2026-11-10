@@ -187,10 +187,61 @@ public class ZAPreProdTestMod implements ModInitializer {
             assertCondition(ChunkHeatManager.computeHordeDurationTicks(1) == 3600, "1 player horde duration must be 3600 ticks (3 mins)");
             assertCondition(ChunkHeatManager.computeHordeDurationTicks(3) == 4800, "3 players horde duration must be 4800 ticks (4 mins)");
 
+            // Verify Death Group Forgiveness (Full Group Wipe + Partial Squad Down-Scaling + 80% Horde Dispersal + 3-Min Grace Period)
+            ChunkHeatManager.clearActiveHordes();
+            UUID squadLeader = UUID.randomUUID();
+            UUID squadMate = UUID.randomUUID();
+            BlockPos wipePos = new BlockPos(10, 100, 10);
+            boolean squadHordeRegistered = ChunkHeatManager.tryRegisterHordeForGroup(wipePos, List.of(squadLeader, squadMate), 2, 10, 4);
+            assertCondition(squadHordeRegistered, "Squad horde registration failed");
+
+            // Spawn 10 horde mobs tagged with "za_horde_mob" around wipePos
+            List<Zombie> squadHordeMobs = new java.util.ArrayList<>();
+            for (int i = 0; i < 10; i++) {
+                Zombie hz = new Zombie(level);
+                hz.addTag("za_horde_mob");
+                hz.setPos(wipePos.getX() + (i % 3), wipePos.getY(), wipePos.getZ() + (i / 3));
+                level.addFreshEntity(hz);
+                squadHordeMobs.add(hz);
+            }
+
+            // 1. Partial Squad Death: squadMate dies
+            boolean partialWiped = ChunkHeatManager.onPlayerDeath(level, squadMate, wipePos, level.getGameTime());
+            assertCondition(!partialWiped, "onPlayerDeath on partial squad death must return false");
+            assertCondition(ChunkHeatManager.isGroupInPostHordeBreather(java.util.Collections.singleton(squadMate), level.getGameTime() + 100L),
+                    "Dead squadmate must receive corpse-run grace period immediately");
+            ChunkHeatManager.ActiveHorde ongoingHorde = ChunkHeatManager.getActiveHordes().stream()
+                    .filter(h -> h.targetGroupPlayerIds.contains(squadLeader))
+                    .findFirst()
+                    .orElse(null);
+            assertCondition(ongoingHorde != null, "Active horde should still target surviving squad leader");
+            assertCondition(ongoingHorde.subWaveCount < 10, "Horde subWaveCount must be scaled down after squadmate death");
+
+            // 2. Full Group Wipe: squadLeader dies -> terminates horde, disperses 80% mobs, grants grace period
+            boolean fullWiped = ChunkHeatManager.onPlayerDeath(level, squadLeader, wipePos, level.getGameTime());
+            assertCondition(fullWiped, "onPlayerDeath on full group wipe must return true");
+            assertCondition(ChunkHeatManager.getActiveHordeCount() == 0, "Active horde count must be 0 after full group wipe");
+            assertCondition(ChunkHeatManager.isGroupInPostHordeBreather(java.util.Collections.singleton(squadLeader), level.getGameTime() + 100L),
+                    "Squad leader must receive corpse-run grace period after wipe");
+
+            // Verify ~80% of horde mobs dispersed / discarded (at most 2 stragglers remain alive)
+            int aliveCount = 0;
+            for (Zombie hz : squadHordeMobs) {
+                if (hz.isAlive() && !hz.isRemoved()) {
+                    aliveCount++;
+                }
+            }
+            assertCondition(aliveCount <= 2, "Expected at most 2 stragglers remaining alive (>=80% dispersed), got " + aliveCount);
+
+            // Clean up remaining test mobs
+            for (Zombie hz : squadHordeMobs) {
+                hz.discard();
+            }
+
             ZDayProgressionManager.setForcedWorldDay(-1);
             ChunkHeatManager.clearAllHeat();
             passed++;
-            LOGGER.info("[Test 5/10] PASS: TaCZ gunfire heat, 1-Horde-Per-Group limit, Post-Horde Breather, and 4-Phase System verified.");
+            LOGGER.info("[Test 5/10] PASS: TaCZ gunfire heat, 1-Horde-Per-Group limit, Death Group Forgiveness (Full Wipe + 80% Dispersal + Grace Period), and 4-Phase System verified.");
 
             // Test 6/10: Bloodmoon schedule, forced Bloodmoon activation & reset
             LOGGER.info("[Test 6/10] Verifying Bloodmoon schedule, forced activation, and reset...");

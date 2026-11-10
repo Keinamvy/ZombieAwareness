@@ -73,6 +73,14 @@ public abstract class MixinLivingEntity {
         }
     }
 
+    @Inject(method = "die", at = @At("HEAD"))
+    public void za$onEntityDie(DamageSource source, CallbackInfo ci) {
+        LivingEntity self = (LivingEntity)(Object)this;
+        if (!self.level().isClientSide() && self instanceof net.minecraft.server.level.ServerPlayer sp && self.level() instanceof ServerLevel serverLevel) {
+            com.corosus.zombieawareness.heat.ChunkHeatManager.onPlayerDeath(serverLevel, sp.getUUID(), sp.blockPosition(), serverLevel.getGameTime());
+        }
+    }
+
     @Inject(method = "setLastHurtByMob", at = @At("HEAD"), cancellable = true)
     public void hookSetLastHurtByMob(LivingEntity livingEntity, CallbackInfo ci) {
         if (ZAUtil.shouldBlockHostileFriendlyFireOrAggro(livingEntity, (Entity)(Object)this)) {
