@@ -18,6 +18,7 @@ import net.minecraft.util.profiling.Profiler;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.PrimedTnt;
@@ -29,6 +30,7 @@ import net.minecraft.world.entity.monster.skeleton.Skeleton;
 import net.minecraft.world.entity.monster.spider.Spider;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.ButtonBlock;
@@ -71,6 +73,12 @@ public class ZAUtil {
 
 	public static String SPEED_BOOST_TAG = "za_speedbosted";
 	public static String ZA_LAST_ACTION = "za_last_action";
+
+    public static final float APEX_ARMOR_BYPASS_RATIO = 0.40f; // Bypasses 40% of player armor
+    public static final float NECROTIC_REGEN_EFFICIENCY = 0.50f; // Reduces healing/regeneration efficiency by 50%
+    public static final long NECROTIC_TRAUMA_DURATION_TICKS = 160L; // 8 seconds
+
+    private static final Map<UUID, Long> necroticTraumaUntilTick = new ConcurrentHashMap<>();
 
     public static boolean debug = false;
     
@@ -996,4 +1004,53 @@ public class ZAUtil {
 			return false;
 		}
 	}
+
+    public static float[] splitApexArmorBypassDamage(float totalDamage) {
+        return new float[]{ totalDamage * (1.0f - APEX_ARMOR_BYPASS_RATIO), totalDamage * APEX_ARMOR_BYPASS_RATIO };
+    }
+
+    public static void applyNecroticTrauma(UUID playerUuid, long currentTick) {
+        if (playerUuid != null) {
+            necroticTraumaUntilTick.put(playerUuid, currentTick + NECROTIC_TRAUMA_DURATION_TICKS);
+        }
+    }
+
+    public static boolean hasNecroticTrauma(UUID playerUuid, long currentTick) {
+        return playerUuid != null && necroticTraumaUntilTick.getOrDefault(playerUuid, -1L) > currentTick;
+    }
+
+    public static void clearNecroticTrauma() {
+        necroticTraumaUntilTick.clear();
+    }
+
+    public static float computeModifiedHealAmount(UUID playerUuid, long currentTick, float baseHealAmount) {
+        if (baseHealAmount <= 0f) {
+            return baseHealAmount;
+        }
+        if (hasNecroticTrauma(playerUuid, currentTick)) {
+            return baseHealAmount * NECROTIC_REGEN_EFFICIENCY;
+        }
+        return baseHealAmount;
+    }
+
+    public static int computeArmorDurabilityShred(int maxDurability) {
+        return Math.max(12, (int) Math.ceil(maxDurability * 0.05));
+    }
+
+    public static int shredPlayerArmorDurability(Player player, ServerLevel level) {
+        if (player == null) return 0;
+        EquipmentSlot[] armorSlots = new EquipmentSlot[]{
+                EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET
+        };
+        int totalShredded = 0;
+        for (EquipmentSlot slot : armorSlots) {
+            ItemStack stack = player.getItemBySlot(slot);
+            if (stack != null && !stack.isEmpty() && stack.isDamageableItem()) {
+                int shred = computeArmorDurabilityShred(stack.getMaxDamage());
+                stack.setDamageValue(Math.min(stack.getMaxDamage() - 1, stack.getDamageValue() + shred));
+                totalShredded += shred;
+            }
+        }
+        return totalShredded;
+    }
 }

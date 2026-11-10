@@ -1,5 +1,6 @@
 package com.corosus.zombieawareness.heat;
 
+import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.bloodmoon.BloodmoonManager;
 import com.corosus.zombieawareness.zday.ZDayProgressionManager;
 import net.minecraft.core.BlockPos;
@@ -213,6 +214,12 @@ public class ChunkHeatAndBloodmoonTest {
         assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.90, 6), "Stage 6 must cap at Phase 2");
         assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.90, 9), "Stage 9 must cap at Phase 3");
         assertEquals(ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, ChunkHeatManager.resolveHordePhase(0.90, 10), "Stage 10 allows Climax Sappers");
+
+        // Progress 0.95 -> Raw Phase 5 (Apex Corrosion)
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.95, 2), "Stage 2 must cap at Phase 1B");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.95, 6), "Stage 6 must cap at Phase 2");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.95, 9), "Stage 9 must cap at Phase 3");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION, ChunkHeatManager.resolveHordePhase(0.95, 10), "Stage 10 progress 0.95 resolves to Phase 5 Apex Corrosion");
     }
 
     @Test
@@ -533,5 +540,81 @@ public class ChunkHeatAndBloodmoonTest {
                 "UUID_P1 must still have corpse-run grace period");
         assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(Collections.singleton(uuidP2), 5000L),
                 "UUID_P2 must have corpse-run grace period");
+    }
+
+    @Test
+    public void apexCorrosiveMechanicsAndArmorDurabilityShred() {
+        // 1. 40% Armor Bypass Damage Split
+        float[] split = ZAUtil.splitApexArmorBypassDamage(10.0f);
+        assertEquals(6.0f, split[0], 1e-4f, "split[0] must be 60% normal armor-mitigated damage (6.0f)");
+        assertEquals(4.0f, split[1], 1e-4f, "split[1] must be 40% direct armor-bypassing damage (4.0f)");
+
+        float[] split20 = ZAUtil.splitApexArmorBypassDamage(20.0f);
+        assertEquals(12.0f, split20[0], 1e-4f);
+        assertEquals(8.0f, split20[1], 1e-4f);
+
+        // 2. Necrotic Trauma: Reduced Regeneration Efficiency (50%) & 160-Tick Duration
+        UUID playerUuid = UUID.randomUUID();
+        ZAUtil.clearNecroticTrauma();
+        assertFalse(ZAUtil.hasNecroticTrauma(playerUuid, 100L));
+        assertEquals(10.0f, ZAUtil.computeModifiedHealAmount(playerUuid, 100L, 10.0f), 1e-4f, "Heal amount unaffected when no trauma");
+
+        ZAUtil.applyNecroticTrauma(playerUuid, 100L);
+        assertTrue(ZAUtil.hasNecroticTrauma(playerUuid, 100L), "Trauma must be active immediately");
+        assertTrue(ZAUtil.hasNecroticTrauma(playerUuid, 259L), "Trauma must remain active within 160 ticks");
+        assertEquals(5.0f, ZAUtil.computeModifiedHealAmount(playerUuid, 150L, 10.0f), 1e-4f, "Heal amount must be halved (50% efficiency) under trauma");
+
+        assertFalse(ZAUtil.hasNecroticTrauma(playerUuid, 260L + 1L), "Trauma must expire after 160 ticks");
+        assertEquals(10.0f, ZAUtil.computeModifiedHealAmount(playerUuid, 261L, 10.0f), 1e-4f, "Heal amount restored to 10.0f after trauma expires");
+
+        // Edge cases
+        assertEquals(-5.0f, ZAUtil.computeModifiedHealAmount(playerUuid, 100L, -5.0f), 1e-4f, "Non-positive heal amounts unaffected");
+        assertEquals(10.0f, ZAUtil.computeModifiedHealAmount(null, 100L, 10.0f), 1e-4f, "Null player UUID handled safely");
+
+        // 3. Direct Armor Durability Shredding
+        assertEquals(20, ZAUtil.computeArmorDurabilityShred(400), "5% of 400 is 20 (>= 12 min)");
+        assertEquals(12, ZAUtil.computeArmorDurabilityShred(100), "5% of 100 is 5, must clamp to minimum 12");
+        assertEquals(12, ZAUtil.computeArmorDurabilityShred(0), "0 max durability must clamp to minimum 12");
+    }
+
+    @Test
+    public void ambientNightHordeAndFortifiedBaseSurroundSiege() {
+        // 1. Spontaneous Late-Game Night Horde Awakening
+        // canAwakenLateGameAmbientHorde(worldStageNum, dayTime, isBloodmoon, canTriggerForGroup, inBreather)
+        assertFalse(ChunkHeatManager.canAwakenLateGameAmbientHorde(6, 15000L, false, true, false), "Stage 6 normal night must NOT awaken spontaneous ambient horde");
+        assertTrue(ChunkHeatManager.canAwakenLateGameAmbientHorde(6, 15000L, true, true, false), "Bloodmoon night allows ambient horde even at Stage 6");
+        assertTrue(ChunkHeatManager.canAwakenLateGameAmbientHorde(7, 15000L, false, true, false), "Stage 7 night window (13000..22500) must allow ambient horde");
+        assertTrue(ChunkHeatManager.canAwakenLateGameAmbientHorde(10, 18000L, false, true, false), "Stage 10 midnight must allow ambient horde");
+
+        // Daytime (e.g. 6000L = noon) must never awaken ambient horde
+        assertFalse(ChunkHeatManager.canAwakenLateGameAmbientHorde(10, 6000L, false, true, false), "Daytime (6000L) must not awaken ambient horde");
+        assertFalse(ChunkHeatManager.canAwakenLateGameAmbientHorde(10, 15000L, false, false, false), "Cannot awaken if group cannot trigger horde");
+        assertFalse(ChunkHeatManager.canAwakenLateGameAmbientHorde(10, 15000L, false, true, true), "Cannot awaken if group is in post-horde breather");
+
+        // 2. Fortified Wall / Base Detection
+        assertTrue(ChunkHeatManager.isFortifiedFromWallCount(5, false), "5 or more blocked directions out of 8 is fortified even without roof/base");
+        assertFalse(ChunkHeatManager.isFortifiedFromWallCount(4, false), "4 blocked directions without roof/base is NOT fortified");
+        assertTrue(ChunkHeatManager.isFortifiedFromWallCount(3, true), "3 blocked directions WITH roof or base block is fortified");
+        assertFalse(ChunkHeatManager.isFortifiedFromWallCount(2, true), "2 blocked directions with roof/base is NOT fortified");
+
+        // 3. Fortified Wave Count Scaling (+40% more mobs)
+        assertEquals(10, ChunkHeatManager.computeFortifiedWaveCount(10, false), "Unfortified wave count remains 10");
+        assertEquals(14, ChunkHeatManager.computeFortifiedWaveCount(10, true), "Fortified wave count scales up to 14 (+40%)");
+        assertEquals(28, ChunkHeatManager.computeFortifiedWaveCount(20, true), "Fortified wave count scales 20 -> 28 (+40%)");
+
+        // 4. Directional Cone vs 360° Surround Spawn Offsets
+        // Directional cone (surroundMode = false): angle offset is normalizedAngle * 40°
+        double[] coneOffsetCenter = ChunkHeatManager.computeSpawnOffset(0.0, 0.0, 0.0, false);
+        assertEquals(38.0, coneOffsetCenter[0], 0.01, "Angle 0 distance 38m -> x=38");
+        assertEquals(0.0, coneOffsetCenter[1], 0.01, "Angle 0 -> y=0");
+
+        double[] coneOffsetMaxAngle = ChunkHeatManager.computeSpawnOffset(0.0, 1.0, 0.0, false);
+        double angleCone = Math.atan2(coneOffsetMaxAngle[1], coneOffsetMaxAngle[0]);
+        assertEquals(Math.toRadians(40.0), angleCone, 1e-4, "Directional cone max angle must be 40 degrees");
+
+        // Surround mode (surroundMode = true): angle offset is normalizedAngle * PI (full 180° = 360° surround)
+        double[] surroundOpposite = ChunkHeatManager.computeSpawnOffset(0.0, 1.0, 0.0, true);
+        assertEquals(-38.0, surroundOpposite[0], 0.01, "Surround mode max angle (180°) must place mobs behind player (x = -38)");
+        assertEquals(0.0, surroundOpposite[1], 0.01);
     }
 }

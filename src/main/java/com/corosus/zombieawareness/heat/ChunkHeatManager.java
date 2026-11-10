@@ -30,6 +30,11 @@ import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
+import net.minecraft.world.level.block.TrapDoorBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
@@ -64,7 +69,8 @@ public class ChunkHeatManager {
         PHASE_1B_VENOM_SPIDERS,
         PHASE_2_BREACHERS_SKELETONS,
         PHASE_3_JUGGERNAUTS_WITCHES,
-        PHASE_4_CLIMAX_SAPPERS
+        PHASE_4_CLIMAX_SAPPERS,
+        PHASE_5_APEX_CORROSION
     }
 
     public static class ActiveHorde {
@@ -78,6 +84,8 @@ public class ChunkHeatManager {
         public int elapsedTicks;
         public int noTargetTicks = 0;
         public boolean climaxRoarPlayed = false;
+        public boolean apexPhaseTriggered = false;
+        public boolean surroundMode = false;
 
         public ActiveHorde(BlockPos center, Set<UUID> targetGroupPlayerIds, int totalDurationTicks, int subWaveCount, int worldStageNum, double approachAngleRad) {
             this.center = center;
@@ -141,8 +149,10 @@ public class ChunkHeatManager {
             raw = HordePhase.PHASE_2_BREACHERS_SKELETONS;
         } else if (progressZeroToOne < 0.85) {
             raw = HordePhase.PHASE_3_JUGGERNAUTS_WITCHES;
-        } else {
+        } else if (progressZeroToOne < 0.93) {
             raw = HordePhase.PHASE_4_CLIMAX_SAPPERS;
+        } else {
+            raw = HordePhase.PHASE_5_APEX_CORROSION;
         }
 
         HordePhase maxAllowed;
@@ -153,7 +163,7 @@ public class ChunkHeatManager {
         } else if (worldStageNum <= 9) {
             maxAllowed = HordePhase.PHASE_3_JUGGERNAUTS_WITCHES;
         } else {
-            maxAllowed = HordePhase.PHASE_4_CLIMAX_SAPPERS;
+            maxAllowed = HordePhase.PHASE_5_APEX_CORROSION;
         }
 
         return raw.ordinal() > maxAllowed.ordinal() ? maxAllowed : raw;
@@ -179,14 +189,20 @@ public class ChunkHeatManager {
         return true;
     }
 
-    public static boolean tryRegisterHordeForGroup(BlockPos center, Collection<UUID> groupPlayerIds, int nearbyPlayers, int subWaveCount, int worldStageNum, double approachAngleRad) {
+    public static boolean tryRegisterHordeForGroup(BlockPos center, Collection<UUID> groupPlayerIds, int nearbyPlayers, int subWaveCount, int worldStageNum, double approachAngleRad, boolean surroundMode) {
         if (!canTriggerHordeForGroup(center, groupPlayerIds)) {
             return false;
         }
         int durationTicks = computeHordeDurationTicks(Math.max(1, nearbyPlayers));
         Set<UUID> ids = (groupPlayerIds == null) ? Collections.emptySet() : Collections.unmodifiableSet(new HashSet<>(groupPlayerIds));
-        activeHordes.add(new ActiveHorde(center, ids, durationTicks, subWaveCount, worldStageNum, approachAngleRad));
+        ActiveHorde horde = new ActiveHorde(center, ids, durationTicks, subWaveCount, worldStageNum, approachAngleRad);
+        horde.surroundMode = surroundMode;
+        activeHordes.add(horde);
         return true;
+    }
+
+    public static boolean tryRegisterHordeForGroup(BlockPos center, Collection<UUID> groupPlayerIds, int nearbyPlayers, int subWaveCount, int worldStageNum, double approachAngleRad) {
+        return tryRegisterHordeForGroup(center, groupPlayerIds, nearbyPlayers, subWaveCount, worldStageNum, approachAngleRad, false);
     }
 
     public static boolean tryRegisterHordeForGroup(BlockPos center, Collection<UUID> groupPlayerIds, int nearbyPlayers, int subWaveCount, int worldStageNum) {
@@ -230,12 +246,83 @@ public class ChunkHeatManager {
         };
     }
 
-    public static double[] computeDirectionalSpawnOffset(double approachAngleRad, double normalizedAngleMinusOneToOne, double normalizedDistZeroToOne) {
+    public static double[] computeSpawnOffset(double approachAngleRad, double normalizedAngleMinusOneToOne, double normalizedDistZeroToOne, boolean surroundMode) {
         double clampedAngle = Math.max(-1.0, Math.min(1.0, normalizedAngleMinusOneToOne));
         double clampedDist = Math.max(0.0, Math.min(1.0, normalizedDistZeroToOne));
-        double angle = approachAngleRad + clampedAngle * Math.toRadians(40.0);
+        double halfArcRad = surroundMode ? Math.PI : Math.toRadians(40.0);
+        double angle = approachAngleRad + clampedAngle * halfArcRad;
         double dist = 38.0 + clampedDist * 14.0;
         return new double[]{ Math.cos(angle) * dist, Math.sin(angle) * dist };
+    }
+
+    public static double[] computeDirectionalSpawnOffset(double approachAngleRad, double normalizedAngleMinusOneToOne, double normalizedDistZeroToOne) {
+        return computeSpawnOffset(approachAngleRad, normalizedAngleMinusOneToOne, normalizedDistZeroToOne, false);
+    }
+
+    public static boolean canAwakenLateGameAmbientHorde(int worldStageNum, long dayTime, boolean isBloodmoon, boolean canTriggerForGroup, boolean inBreather) {
+        if (!canTriggerForGroup || inBreather) return false;
+        long timeOfDay = ((dayTime % 24000L) + 24000L) % 24000L;
+        boolean isNightWindow = timeOfDay >= 13000L && timeOfDay <= 22500L;
+        if (!isNightWindow) return false;
+        return isBloodmoon || worldStageNum >= 7;
+    }
+
+    public static boolean isFortifiedFromWallCount(int blockedDirectionsOutOf8, boolean hasRoofOrBaseBlock) {
+        return blockedDirectionsOutOf8 >= 5 || (blockedDirectionsOutOf8 >= 3 && hasRoofOrBaseBlock);
+    }
+
+    public static int computeFortifiedWaveCount(int baseWaveCount, boolean isFortified) {
+        return isFortified ? (int) Math.ceil(baseWaveCount * 1.40) : baseWaveCount;
+    }
+
+    private static final int[][] COMPASS_DIRECTIONS = {
+        {1, 0}, {1, 1}, {0, 1}, {-1, 1},
+        {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
+    };
+
+    public static boolean hasNearbyBaseBlockEntity(ServerLevel level, BlockPos center, int radius) {
+        if (level == null || center == null) return false;
+        BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -2; dy <= 4; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                    if (level.getBlockEntity(mpos) != null) {
+                        return true;
+                    }
+                    BlockState bs = level.getBlockState(mpos);
+                    if (bs.getBlock() instanceof BedBlock) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public static boolean isPositionFortifiedByWallsOrBase(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return false;
+        int blockedDirections = 0;
+        BlockPos scanCenter = center.above();
+        for (int[] dir : COMPASS_DIRECTIONS) {
+            boolean blocked = false;
+            for (int dist = 1; dist <= 10; dist++) {
+                BlockPos checkPos = scanCenter.offset(dir[0] * dist, 0, dir[1] * dist);
+                BlockState state = level.getBlockState(checkPos);
+                if ((!state.isAir() && (state.isSolid() || !state.getCollisionShape(level, checkPos).isEmpty()))
+                        || state.getBlock() instanceof DoorBlock
+                        || state.getBlock() instanceof FenceGateBlock
+                        || state.getBlock() instanceof TrapDoorBlock) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if (blocked) {
+                blockedDirections++;
+            }
+        }
+        boolean hasRoofOrBase = !level.canSeeSkyFromBelowWater(scanCenter) || hasNearbyBaseBlockEntity(level, center, 8);
+        return isFortifiedFromWallCount(blockedDirections, hasRoofOrBase);
     }
 
     public static int getActiveHordeCount() {
@@ -568,20 +655,23 @@ public class ChunkHeatManager {
     }
 
     public static void spawnPhasedSubWave(ServerLevel level, BlockPos center, HordePhase phase, int count, int worldStageNum) {
-        spawnPhasedSubWave(level, center, new Random().nextDouble() * 2.0 * Math.PI, phase, count, worldStageNum);
+        spawnPhasedSubWave(level, center, new Random().nextDouble() * 2.0 * Math.PI, phase, count, worldStageNum, false);
     }
 
     public static void spawnPhasedSubWave(ServerLevel level, BlockPos center, double approachAngleRad, HordePhase phase, int count, int worldStageNum) {
+        spawnPhasedSubWave(level, center, approachAngleRad, phase, count, worldStageNum, false);
+    }
+
+    public static void spawnPhasedSubWave(ServerLevel level, BlockPos center, double approachAngleRad, HordePhase phase, int count, int worldStageNum, boolean surroundMode) {
         if (level == null || center == null || count <= 0) return;
         Random rand = new Random();
-        double coneHalfWidthRad = Math.toRadians(40.0);
 
         for (int i = 0; i < count; i++) {
-            double angleOffset = (rand.nextDouble() * 2.0 - 1.0) * coneHalfWidthRad;
-            double spawnAngle = approachAngleRad + angleOffset;
-            double spawnDist = 38.0 + rand.nextDouble() * 14.0;
-            double targetX = center.getX() + Math.cos(spawnAngle) * spawnDist;
-            double targetZ = center.getZ() + Math.sin(spawnAngle) * spawnDist;
+            double normAngle = rand.nextDouble() * 2.0 - 1.0;
+            double normDist = rand.nextDouble();
+            double[] offset = computeSpawnOffset(approachAngleRad, normAngle, normDist, surroundMode);
+            double targetX = center.getX() + offset[0];
+            double targetZ = center.getZ() + offset[1];
             int spawnY = findSafeSpawnY(level, (int) targetX, center.getY(), (int) targetZ);
 
             try {
@@ -651,10 +741,38 @@ public class ChunkHeatManager {
                             mob = createMobById(level, "creeper");
                         }
                     }
+                    case PHASE_5_APEX_CORROSION -> {
+                        if (roll < 0.40f) {
+                            Zombie z = new Zombie(level);
+                            if (rand.nextBoolean()) {
+                                com.nll.nightmareesm.nightmareesm.applyJuggernautLoadout(z);
+                                z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                            } else {
+                                if (rand.nextBoolean()) {
+                                    z.addTag("za_tnt_sapper");
+                                } else {
+                                    new com.nll.nightmareesm.GiveRandomPickaxe(z);
+                                }
+                            }
+                            mob = z;
+                        } else if (roll < 0.60f) {
+                            mob = createMobById(level, "cave_spider");
+                        } else if (roll < 0.80f) {
+                            mob = createMobById(level, "wither_skeleton");
+                            if (mob == null) {
+                                mob = createMobById(level, "skeleton");
+                            }
+                        } else {
+                            mob = createMobById(level, "creeper");
+                        }
+                    }
                 }
 
                 if (mob != null) {
                     mob.addTag("za_horde_mob");
+                    if (phase == HordePhase.PHASE_5_APEX_CORROSION) {
+                        mob.addTag("za_apex_corrosive");
+                    }
                     if (mob instanceof Zombie || mob instanceof AbstractSkeleton) {
                         mob.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 7200, 0, false, false));
                     }
@@ -698,18 +816,96 @@ public class ChunkHeatManager {
             level.addFreshEntity(waypoint);
         } catch (Throwable ignored) {}
 
-        HordePhase initialPhase = resolveHordePhase(0.0, stage);
-        int initialWaveCount = Math.max(8, waveSize);
-        spawnPhasedSubWave(level, center, approachAngleRad, initialPhase, initialWaveCount, stage);
+        boolean fortified = isPositionFortifiedByWallsOrBase(level, center);
+        int finalWaveSize = computeFortifiedWaveCount(waveSize, fortified);
 
-        int subWaveCount = Math.max(6, waveSize / 3);
-        tryRegisterHordeForGroup(center, groupPlayerIds, nearbyPlayers, subWaveCount, stage, approachAngleRad);
+        HordePhase initialPhase = resolveHordePhase(0.0, stage);
+        int initialWaveCount = Math.max(8, finalWaveSize);
+        spawnPhasedSubWave(level, center, approachAngleRad, initialPhase, initialWaveCount, stage, fortified);
+
+        int subWaveCount = Math.max(6, finalWaveSize / 3);
+        tryRegisterHordeForGroup(center, groupPlayerIds, nearbyPlayers, subWaveCount, stage, approachAngleRad, fortified);
+
+        if (fortified && level.players() != null) {
+            for (ServerPlayer player : level.players()) {
+                if (player != null && (groupPlayerIds.contains(player.getUUID()) || player.distanceToSqr(originX, originY, originZ) <= 64.0 * 64.0)) {
+                    player.sendSystemMessage(Component.literal("§4§l[!] THE HORDE HAS SURROUNDED YOUR FORTIFICATION — HOLD THE LINE!"));
+                }
+            }
+        }
     }
 
     public static void tickServer(ServerLevel overworld) {
-        if (overworld == null || activeHordes.isEmpty()) return;
-        List<ActiveHorde> toRemove = new ArrayList<>();
+        if (overworld == null) return;
         long currentTick = overworld.getGameTime();
+
+        // 1. Ambient Late-Game Night Horde Check (runs every 1200 ticks = 60s)
+        if (currentTick % 1200L == 0 && overworld.players() != null && !overworld.players().isEmpty()) {
+            int stage = 1;
+            for (int s = 10; s >= 1; s--) {
+                if (ZDayProgressionManager.isStageUnlocked(s)) {
+                    stage = s;
+                    break;
+                }
+            }
+            boolean bloodmoon = BloodmoonManager.isBloodmoonActive(overworld);
+            Random ambientRand = new Random();
+
+            Set<UUID> evaluatedPlayers = new HashSet<>();
+            for (ServerPlayer player : overworld.players()) {
+                if (player == null || evaluatedPlayers.contains(player.getUUID())) continue;
+                if (!player.isAlive() || player.isDeadOrDying() || player.isSpectator() || player.isCreative()) {
+                    evaluatedPlayers.add(player.getUUID());
+                    continue;
+                }
+
+                Set<UUID> groupPlayerIds = new HashSet<>();
+                int nearbyPlayers = 0;
+                for (ServerPlayer other : overworld.players()) {
+                    if (other == null) continue;
+                    double distSq = other.distanceToSqr(player.position());
+                    if (distSq <= GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS) {
+                        groupPlayerIds.add(other.getUUID());
+                        evaluatedPlayers.add(other.getUUID());
+                    }
+                    if (distSq <= 64.0 * 64.0) {
+                        nearbyPlayers++;
+                    }
+                }
+                if (nearbyPlayers == 0) nearbyPlayers = Math.max(1, groupPlayerIds.size());
+
+                BlockPos triggerPos = player.blockPosition();
+                boolean canTrigger = canTriggerHordeForGroup(triggerPos, groupPlayerIds);
+                boolean inBreather = isGroupInPostHordeBreather(groupPlayerIds, currentTick);
+
+                if (canAwakenLateGameAmbientHorde(stage, overworld.getDefaultClockTime(), bloodmoon, canTrigger, inBreather)) {
+                    float chance = bloodmoon ? 1.0f : 0.35f;
+                    if (ambientRand.nextFloat() < chance) {
+                        double approachAngleRad = ambientRand.nextDouble() * 2.0 * Math.PI;
+                        double roarX = player.getX() + Math.cos(approachAngleRad) * 45.0;
+                        double roarZ = player.getZ() + Math.sin(approachAngleRad) * 45.0;
+
+                        int durationTicks = computeHordeDurationTicks(nearbyPlayers);
+                        resetHeatAround((int) player.getX(), (int) player.getZ(), currentTick);
+                        markGroupPostHordeBreather(groupPlayerIds, currentTick + durationTicks);
+
+                        playHordeRoar(overworld, roarX, player.getY(), roarZ);
+
+                        for (ServerPlayer p : overworld.players()) {
+                            if (p != null && (groupPlayerIds.contains(p.getUUID()) || p.distanceToSqr(player.position()) <= 64.0 * 64.0)) {
+                                p.sendSystemMessage(Component.literal("§4§l[!] THE NIGHT CHILL CONDENSES — AN APEX SIEGE HORDE HAS AWAKENED!"));
+                            }
+                        }
+
+                        int waveSize = computeSquadScaledWaveSize(ZAConfigZDay.baseSwarmWaveSize, stage, nearbyPlayers, bloodmoon);
+                        triggerSwarmWave(overworld, player.getX(), player.getY(), player.getZ(), waveSize, nearbyPlayers, stage, groupPlayerIds, approachAngleRad);
+                    }
+                }
+            }
+        }
+
+        if (activeHordes.isEmpty()) return;
+        List<ActiveHorde> toRemove = new ArrayList<>();
 
         for (ActiveHorde horde : activeHordes) {
             horde.elapsedTicks++;
@@ -767,14 +963,25 @@ public class ChunkHeatManager {
             double progress = (double) horde.elapsedTicks / (double) horde.totalDurationTicks;
             HordePhase phase = resolveHordePhase(progress, horde.worldStageNum);
 
+            boolean fortified = isPositionFortifiedByWallsOrBase(overworld, horde.center);
+            horde.surroundMode = fortified;
+            int currentSubWaveCount = computeFortifiedWaveCount(horde.subWaveCount, fortified);
+
             if (phase == HordePhase.PHASE_4_CLIMAX_SAPPERS && !horde.climaxRoarPlayed) {
                 horde.climaxRoarPlayed = true;
                 BlockPos staging = horde.getStagingOrigin();
                 playHordeRoar(overworld, staging.getX(), staging.getY(), staging.getZ());
             }
 
+            if (phase == HordePhase.PHASE_5_APEX_CORROSION && !horde.apexPhaseTriggered) {
+                horde.apexPhaseTriggered = true;
+                BlockPos staging = horde.getStagingOrigin();
+                playHordeRoar(overworld, staging.getX(), staging.getY(), staging.getZ());
+                spawnPhasedSubWave(overworld, horde.center, horde.approachAngleRad, phase, currentSubWaveCount, horde.worldStageNum, horde.surroundMode);
+            }
+
             if (horde.elapsedTicks % 300 == 0) {
-                spawnPhasedSubWave(overworld, horde.center, horde.approachAngleRad, phase, horde.subWaveCount, horde.worldStageNum);
+                spawnPhasedSubWave(overworld, horde.center, horde.approachAngleRad, phase, currentSubWaveCount, horde.worldStageNum, horde.surroundMode);
             }
         }
         if (!toRemove.isEmpty()) {

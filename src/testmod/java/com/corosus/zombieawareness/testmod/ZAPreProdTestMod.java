@@ -361,12 +361,48 @@ public class ZAPreProdTestMod implements ModInitializer {
             passed++;
             LOGGER.info("[Test 8/10] PASS: EntityScent lifecycle and Zombie AI scent pathfinding verified.");
 
-            // Test 9/10: Directional Horde Cone Spawning (38-52m, ±40°), Directional Roar (10% dist / 20% wall), and Crimson Seal Portal Lockdown
-            LOGGER.info("[Test 9/10] Verifying Directional Horde Cone Spawning, Directional Roar Capped Attenuation, and Crimson Seal Portal Lockdown...");
+            // Test 9/10: Directional Horde Cone Spawning (38-52m, ±40°), 360° Surround Siege, Apex Corrosion Phase 5, and Crimson Seal Lockdown
+            LOGGER.info("[Test 9/10] Verifying Directional Cone Spawning, 360° Surround Siege, Apex Corrosion Phase 5, and Crimson Seal Portal Lockdown...");
             double[] spawnOffsetMin = ChunkHeatManager.computeDirectionalSpawnOffset(0.0, 0.0, 0.0);
             double[] spawnOffsetMax = ChunkHeatManager.computeDirectionalSpawnOffset(0.0, 0.0, 1.0);
             assertCondition(Math.abs(Math.hypot(spawnOffsetMin[0], spawnOffsetMin[1]) - 38.0) < 0.01, "Expected min directional spawn dist 38.0m");
             assertCondition(Math.abs(Math.hypot(spawnOffsetMax[0], spawnOffsetMax[1]) - 52.0) < 0.01, "Expected max directional spawn dist 52.0m");
+
+            // 360° Surround Fortification Siege checks
+            double[] surroundOpposite = ChunkHeatManager.computeSpawnOffset(0.0, 1.0, 0.0, true);
+            assertCondition(Math.abs(surroundOpposite[0] - (-38.0)) < 0.01 && Math.abs(surroundOpposite[1]) < 0.01, "Expected surround opposite at (-38, 0)");
+            assertCondition(ChunkHeatManager.isFortifiedFromWallCount(5, false), "5 wall directions must be fortified");
+            assertCondition(ChunkHeatManager.isFortifiedFromWallCount(3, true), "3 wall directions with roof/base must be fortified");
+            assertCondition(!ChunkHeatManager.isFortifiedFromWallCount(4, false), "4 wall directions without roof must not be fortified");
+            assertCondition(ChunkHeatManager.computeFortifiedWaveCount(10, false) == 10, "Unfortified wave count unchanged");
+            assertCondition(ChunkHeatManager.computeFortifiedWaveCount(10, true) == 14, "Fortified wave count +40% (14)");
+
+            // Spontaneous Night Horde Awakening
+            assertCondition(ChunkHeatManager.canAwakenLateGameAmbientHorde(7, 15000L, false, true, false), "Stage 7 night window must awaken ambient horde");
+            assertCondition(!ChunkHeatManager.canAwakenLateGameAmbientHorde(6, 15000L, false, true, false), "Stage 6 normal night must not awaken ambient horde");
+            assertCondition(ChunkHeatManager.canAwakenLateGameAmbientHorde(6, 15000L, true, true, false), "Bloodmoon night must awaken ambient horde even at Stage 6");
+            assertCondition(!ChunkHeatManager.canAwakenLateGameAmbientHorde(10, 6000L, false, true, false), "Daytime must not awaken ambient horde");
+
+            // Super-late-game Phase 5 Apex Corrosion & ZAUtil Apex Mechanics
+            assertCondition(ChunkHeatManager.resolveHordePhase(0.95, 10) == ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION, "Stage 10 at 0.95 progress must resolve to PHASE_5_APEX_CORROSION");
+            assertCondition(ChunkHeatManager.resolveHordePhase(0.90, 10) == ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, "Stage 10 at 0.90 progress must resolve to PHASE_4_CLIMAX_SAPPERS");
+            assertCondition(ChunkHeatManager.resolveHordePhase(0.95, 9) == ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, "Stage 9 at 0.95 progress must cap at PHASE_3_JUGGERNAUTS_WITCHES");
+
+            float[] apexSplit = ZAUtil.splitApexArmorBypassDamage(10.0f);
+            assertCondition(Math.abs(apexSplit[0] - 6.0f) < 0.001f, "Expected 6.0f normal damage (60%)");
+            assertCondition(Math.abs(apexSplit[1] - 4.0f) < 0.001f, "Expected 4.0f armor bypass damage (40%)");
+
+            UUID testPlayerId = UUID.randomUUID();
+            ZAUtil.clearNecroticTrauma();
+            assertCondition(Math.abs(ZAUtil.computeModifiedHealAmount(testPlayerId, 1000L, 10.0f) - 10.0f) < 0.001f, "Heal amount unaffected without trauma");
+            ZAUtil.applyNecroticTrauma(testPlayerId, 1000L);
+            assertCondition(ZAUtil.hasNecroticTrauma(testPlayerId, 1050L), "Player has necrotic trauma within 160 ticks");
+            assertCondition(Math.abs(ZAUtil.computeModifiedHealAmount(testPlayerId, 1050L, 10.0f) - 5.0f) < 0.001f, "Heal amount halved under necrotic trauma");
+            assertCondition(!ZAUtil.hasNecroticTrauma(testPlayerId, 1161L), "Necrotic trauma expires after 160 ticks");
+            assertCondition(Math.abs(ZAUtil.computeModifiedHealAmount(testPlayerId, 1161L, 10.0f) - 10.0f) < 0.001f, "Heal amount restored after trauma expiry");
+
+            assertCondition(ZAUtil.computeArmorDurabilityShred(400) == 20, "Durability shred for 400 max durability should be 20");
+            assertCondition(ZAUtil.computeArmorDurabilityShred(100) == 12, "Durability shred for 100 max durability should be min 12");
 
             float vol0Unobstructed = ChunkHeatManager.computeRoarVolumeMultiplier(0.0, false);
             float vol128Unobstructed = ChunkHeatManager.computeRoarVolumeMultiplier(128.0, false);

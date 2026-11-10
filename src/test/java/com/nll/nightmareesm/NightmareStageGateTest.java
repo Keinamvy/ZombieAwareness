@@ -204,4 +204,31 @@ public class NightmareStageGateTest {
       assertFalse(com.corosus.zombieawareness.ZAUtil.isPortalBlock(null));
       assertFalse(com.corosus.zombieawareness.ZAUtil.shouldBlockHostileFriendlyFireOrAggro(null, null));
    }
+
+   @Test
+   @DisplayName("Super-late-game Stage 10 Apex Horde phase resolution and ZAUtil apex corrosive mechanics")
+   void testApexCorrosiveStageGateAndMechanics() {
+      assertEquals(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION,
+         com.corosus.zombieawareness.heat.ChunkHeatManager.resolveHordePhase(0.95, 10));
+      assertEquals(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES,
+         com.corosus.zombieawareness.heat.ChunkHeatManager.resolveHordePhase(0.95, 9));
+      assertEquals(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS,
+         com.corosus.zombieawareness.heat.ChunkHeatManager.resolveHordePhase(0.90, 10));
+
+      float[] split = com.corosus.zombieawareness.ZAUtil.splitApexArmorBypassDamage(20.0f);
+      assertEquals(12.0f, split[0], 1e-4f);
+      assertEquals(8.0f, split[1], 1e-4f);
+
+      java.util.UUID uuid = java.util.UUID.randomUUID();
+      com.corosus.zombieawareness.ZAUtil.clearNecroticTrauma();
+      assertEquals(20.0f, com.corosus.zombieawareness.ZAUtil.computeModifiedHealAmount(uuid, 100L, 20.0f));
+      com.corosus.zombieawareness.ZAUtil.applyNecroticTrauma(uuid, 100L);
+      assertTrue(com.corosus.zombieawareness.ZAUtil.hasNecroticTrauma(uuid, 100L));
+      assertEquals(10.0f, com.corosus.zombieawareness.ZAUtil.computeModifiedHealAmount(uuid, 100L, 20.0f));
+      assertFalse(com.corosus.zombieawareness.ZAUtil.hasNecroticTrauma(uuid, 261L));
+      assertEquals(20.0f, com.corosus.zombieawareness.ZAUtil.computeModifiedHealAmount(uuid, 261L, 20.0f));
+
+      assertEquals(20, com.corosus.zombieawareness.ZAUtil.computeArmorDurabilityShred(400));
+      assertEquals(12, com.corosus.zombieawareness.ZAUtil.computeArmorDurabilityShred(100));
+   }
 }

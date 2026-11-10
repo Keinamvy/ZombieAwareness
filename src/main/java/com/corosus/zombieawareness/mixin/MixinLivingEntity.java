@@ -14,13 +14,18 @@ import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(LivingEntity.class)
 public abstract class MixinLivingEntity {
+
+    @Unique
+    private boolean za$processingApexBypass = false;
 
     @Inject(method = "tick",
             at = @At(value = "HEAD"), cancellable = true)
@@ -46,10 +51,49 @@ public abstract class MixinLivingEntity {
         Entity attacker = source.getEntity();
         Entity directEntity = source.getDirectEntity();
 
-        if (victim instanceof Player player) {
+        if (victim instanceof Player player && !za$processingApexBypass) {
             if ((attacker != null && attacker.entityTags().contains("za_crawler"))
                     || (directEntity != null && directEntity.entityTags().contains("za_crawler"))) {
                 player.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, 60, 1));
+            }
+
+            boolean isApex = (attacker != null && attacker.entityTags().contains("za_apex_corrosive"))
+                    || (directEntity != null && directEntity.entityTags().contains("za_apex_corrosive"));
+            if (isApex) {
+                // 1. Necrotic Trauma: reduced regeneration efficiency
+                ZAUtil.applyNecroticTrauma(player.getUUID(), level.getGameTime());
+
+                // 2. Chance (50%) to Deal Direct Armor Durability Shredding
+                if (level.getRandom().nextFloat() < 0.50f) {
+                    ZAUtil.shredPlayerArmorDurability(player, level);
+                }
+
+                // 3. Chance (60%) to Bypass 40% of Player Armor
+                if (level.getRandom().nextFloat() < 0.60f && amount > 0.0f) {
+                    float[] split = ZAUtil.splitApexArmorBypassDamage(amount);
+                    za$processingApexBypass = true;
+                    try {
+                        float bypassDmg = split[1];
+                        float absorption = player.getAbsorptionAmount();
+                        if (absorption > 0.0f) {
+                            if (absorption >= bypassDmg) {
+                                player.setAbsorptionAmount(absorption - bypassDmg);
+                                bypassDmg = 0.0f;
+                            } else {
+                                player.setAbsorptionAmount(0.0f);
+                                bypassDmg -= absorption;
+                            }
+                        }
+                        if (bypassDmg > 0.0f) {
+                            player.setHealth(Math.max(0.0f, player.getHealth() - bypassDmg));
+                        }
+                        boolean result = ((LivingEntity)(Object)this).hurtServer(level, source, split[0]);
+                        cir.setReturnValue(result);
+                        return;
+                    } finally {
+                        za$processingApexBypass = false;
+                    }
+                }
             }
         }
 
@@ -86,5 +130,14 @@ public abstract class MixinLivingEntity {
         if (ZAUtil.shouldBlockHostileFriendlyFireOrAggro(livingEntity, (Entity)(Object)this)) {
             ci.cancel();
         }
+    }
+
+    @ModifyVariable(method = "heal", at = @At("HEAD"), ordinal = 0, argsOnly = true)
+    private float za$modifyPlayerHealUnderNecroticTrauma(float healAmount) {
+        LivingEntity self = (LivingEntity)(Object)this;
+        if (!self.level().isClientSide() && self instanceof Player player) {
+            return ZAUtil.computeModifiedHealAmount(player.getUUID(), self.level().getGameTime(), healAmount);
+        }
+        return healAmount;
     }
 }
