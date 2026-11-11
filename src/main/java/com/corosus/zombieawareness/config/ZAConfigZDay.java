@@ -41,7 +41,7 @@ public class ZAConfigZDay implements IConfigCategory {
     public static int chunkHeatThreshold = 100;
 
     @ConfigComment("Base number of zombies summoned in a gunfire swarm wave")
-    public static int baseSwarmWaveSize = 16;
+    public static int baseSwarmWaveSize = 28;
 
     @Override
     public String getName() {

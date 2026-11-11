@@ -25,6 +25,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Phantom;
 import net.minecraft.world.entity.monster.skeleton.AbstractSkeleton;
 import net.minecraft.world.entity.monster.zombie.Zombie;
@@ -61,6 +62,9 @@ public class ChunkHeatManager {
     public static final long POST_HORDE_BREATHER_TICKS = 1800L;
     public static final long CORPSE_RUN_GRACE_TICKS = 3600L;
     public static final double GROUP_CLUSTER_RADIUS = 96.0;
+    public static final double HORDE_MOB_HEALTH_MULTIPLIER = 0.75;
+    public static final double HORDE_JUGGERNAUT_MAX_HEALTH_CAP = 20.0;
+    public static final int NO_DRY_SPAWN_Y = Integer.MIN_VALUE;
     private static final Map<Long, HeatEntry> heatMap = new ConcurrentHashMap<>();
     private static final List<ActiveHorde> activeHordes = new CopyOnWriteArrayList<>();
     private static final Map<UUID, Long> playerBreatherUntilTick = new ConcurrentHashMap<>();
@@ -179,6 +183,25 @@ public class ChunkHeatManager {
 
     public static int computePhantomSpawnY(int groundSpawnY) {
         return groundSpawnY + 16;
+    }
+
+    public static double computeHordeMobMaxHealth(double baseMaxHealth, boolean isJuggernaut) {
+        if (baseMaxHealth <= 0.0) return 15.0;
+        if (isJuggernaut) {
+            return Math.min(HORDE_JUGGERNAUT_MAX_HEALTH_CAP, baseMaxHealth);
+        }
+        return Math.max(8.0, Math.round(baseMaxHealth * HORDE_MOB_HEALTH_MULTIPLIER));
+    }
+
+    public static void applyHordeMobHealthScaling(Mob mob) {
+        if (mob == null) return;
+        var attr = mob.getAttribute(Attributes.MAX_HEALTH);
+        if (attr != null) {
+            mob.removeEffect(MobEffects.HEALTH_BOOST);
+            double targetMax = computeHordeMobMaxHealth(attr.getBaseValue(), mob.entityTags().contains("za_juggernaut"));
+            attr.setBaseValue(targetMax);
+            mob.setHealth((float) targetMax);
+        }
     }
 
     public static boolean canTriggerHordeForGroup(BlockPos triggerPos, Collection<UUID> groupPlayerIds) {
@@ -563,15 +586,19 @@ public class ChunkHeatManager {
     }
 
     public static int computeSquadScaledWaveSize(int baseSize, int stageNum, int nearbyPlayers, boolean bloodmoon) {
-        int base = baseSize > 0 ? baseSize : 16;
+        int base = baseSize > 0 ? baseSize : 28;
         int squad = Math.max(1, nearbyPlayers);
         int stage = Math.max(1, stageNum);
 
-        int wave = base + (squad - 1) * 4 + (stage - 1) * 2;
+        int wave = base + (squad - 1) * 6 + (stage - 1) * 3;
         if (bloodmoon) {
             wave *= 2;
         }
         return wave;
+    }
+
+    public static int computeSubWaveCount(int finalWaveSize) {
+        return Math.max(12, (int) Math.ceil(finalWaveSize * 0.55));
     }
 
     private static void sendDirectRoarSound(ServerLevel level, ServerPlayer player, SoundEvent soundEvent, double x, double y, double z, float volume, float pitch) {
@@ -652,18 +679,110 @@ public class ChunkHeatManager {
         return (created instanceof Mob m) ? m : null;
     }
 
-    public static int findSafeSpawnY(ServerLevel level, int x, int preferredY, int z) {
+    public static boolean isDrySolidSpawnColumn(BlockState belowState, BlockState feetState, BlockState headState) {
+        if (belowState == null || feetState == null || headState == null) {
+            return false;
+        }
+        if (!belowState.getFluidState().isEmpty() || !feetState.getFluidState().isEmpty() || !headState.getFluidState().isEmpty()) {
+            return false;
+        }
+        if (belowState.isAir() || !belowState.isSolid()) {
+            return false;
+        }
+        return feetState.isAir() && headState.isAir();
+    }
+
+    public static int findSafeDrySpawnY(ServerLevel level, int x, int preferredY, int z) {
         if (level == null) return preferredY;
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (int y = preferredY + 6; y >= preferredY - 8; y--) {
-            pos.set(x, y, z);
-            if (!level.getBlockState(pos.below()).isAir()
-                    && level.getBlockState(pos).isAir()
-                    && level.getBlockState(pos.above()).isAir()) {
+        BlockPos.MutableBlockPos belowPos = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos feetPos = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos abovePos = new BlockPos.MutableBlockPos();
+
+        for (int y = preferredY + 8; y >= preferredY - 12; y--) {
+            feetPos.set(x, y, z);
+            belowPos.set(x, y - 1, z);
+            abovePos.set(x, y + 1, z);
+            BlockState belowState = level.getBlockState(belowPos);
+            BlockState feetState = level.getBlockState(feetPos);
+            BlockState headState = level.getBlockState(abovePos);
+            if (isDrySolidSpawnColumn(belowState, feetState, headState)
+                    && !belowState.getCollisionShape(level, belowPos).isEmpty()) {
                 return y;
             }
         }
-        return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        feetPos.set(x, surfaceY, z);
+        belowPos.set(x, surfaceY - 1, z);
+        abovePos.set(x, surfaceY + 1, z);
+        BlockState belowState = level.getBlockState(belowPos);
+        BlockState feetState = level.getBlockState(feetPos);
+        BlockState headState = level.getBlockState(abovePos);
+        if (isDrySolidSpawnColumn(belowState, feetState, headState)
+                && !belowState.getCollisionShape(level, belowPos).isEmpty()) {
+            return surfaceY;
+        }
+        return NO_DRY_SPAWN_Y;
+    }
+
+    public static int findSafeSpawnY(ServerLevel level, int x, int preferredY, int z) {
+        int dryY = findSafeDrySpawnY(level, x, preferredY, z);
+        return dryY != NO_DRY_SPAWN_Y ? dryY : preferredY;
+    }
+
+    public static double selectDryApproachAngle(ServerLevel level, BlockPos center, double preferredAngleRad) {
+        if (level == null || center == null) return preferredAngleRad;
+        for (int k = 0; k < 12; k++) {
+            double angle = preferredAngleRad + k * (2.0 * Math.PI / 12.0);
+            int testX = (int) Math.round(center.getX() + Math.cos(angle) * 45.0);
+            int testZ = (int) Math.round(center.getZ() + Math.sin(angle) * 45.0);
+            int dryY = findSafeDrySpawnY(level, testX, center.getY(), testZ);
+            if (dryY != NO_DRY_SPAWN_Y) {
+                return angle;
+            }
+        }
+        return preferredAngleRad;
+    }
+
+    public static int recruitNearbyWildMobsToHorde(ServerLevel level, BlockPos center, double radius) {
+        if (level == null || center == null || radius <= 0) return 0;
+        double radiusSq = radius * radius;
+        double centerX = center.getX() + 0.5;
+        double centerY = center.getY() + 0.5;
+        double centerZ = center.getZ() + 0.5;
+
+        int recruited = 0;
+        for (Entity entity : level.getAllEntities()) {
+            if (entity instanceof Mob mob && mob.isAlive()) {
+                if (mob.distanceToSqr(centerX, centerY, centerZ) <= radiusSq && ZAUtil.isHostileMob(mob)) {
+                    if (!mob.entityTags().contains("za_horde_mob")) {
+                        mob.addTag("za_horde_mob");
+                    }
+                    if (mob.getTarget() == null) {
+                        ServerPlayer nearestSurvival = null;
+                        double nearestPlayerDistSq = 96.0 * 96.0;
+                        if (level.players() != null) {
+                            for (ServerPlayer player : level.players()) {
+                                if (player != null && player.isAlive() && !player.isDeadOrDying() && !player.isSpectator() && !player.isCreative()) {
+                                    double dSq = player.distanceToSqr(mob);
+                                    if (dSq <= nearestPlayerDistSq) {
+                                        nearestPlayerDistSq = dSq;
+                                        nearestSurvival = player;
+                                    }
+                                }
+                            }
+                        }
+                        if (nearestSurvival != null) {
+                            mob.setTarget(nearestSurvival);
+                        }
+                    }
+                    try {
+                        CoroUtilPath.tryMoveToXYZLongDist(mob, center.getX(), center.getY(), center.getZ(), 1.0);
+                    } catch (Throwable ignored) {}
+                    recruited++;
+                }
+            }
+        }
+        return recruited;
     }
 
     public static void spawnPhasedSubWave(ServerLevel level, BlockPos center, HordePhase phase, int count, int worldStageNum) {
@@ -679,16 +798,50 @@ public class ChunkHeatManager {
         Random rand = new Random();
 
         for (int i = 0; i < count; i++) {
-            double normAngle = rand.nextDouble() * 2.0 - 1.0;
-            double normDist = rand.nextDouble();
-            double[] offset = computeSpawnOffset(approachAngleRad, normAngle, normDist, surroundMode);
-            double targetX = center.getX() + offset[0];
-            double targetZ = center.getZ() + offset[1];
-            int spawnY = findSafeSpawnY(level, (int) targetX, center.getY(), (int) targetZ);
+            float roll = rand.nextFloat();
+            boolean willBePhantom = canHordeSpawnPhantoms(phase, worldStageNum) && (roll >= 0.88f);
+
+            double targetX = center.getX();
+            double targetZ = center.getZ();
+            int spawnY = NO_DRY_SPAWN_Y;
+
+            for (int attempt = 0; attempt < 16; attempt++) {
+                double candX, candZ;
+                if (attempt < 8) {
+                    double normAngle = rand.nextDouble() * 2.0 - 1.0;
+                    double normDist = rand.nextDouble();
+                    double[] offset = computeSpawnOffset(approachAngleRad, normAngle, normDist, surroundMode);
+                    candX = center.getX() + offset[0];
+                    candZ = center.getZ() + offset[1];
+                } else {
+                    double sweepAngle = rand.nextDouble() * 2.0 * Math.PI;
+                    double sweepDist = 24.0 + rand.nextDouble() * 28.0;
+                    candX = center.getX() + Math.cos(sweepAngle) * sweepDist;
+                    candZ = center.getZ() + Math.sin(sweepAngle) * sweepDist;
+                }
+                int foundY = findSafeDrySpawnY(level, (int) candX, center.getY(), (int) candZ);
+                if (foundY != NO_DRY_SPAWN_Y) {
+                    targetX = candX;
+                    targetZ = candZ;
+                    spawnY = foundY;
+                    break;
+                }
+            }
+
+            if (spawnY == NO_DRY_SPAWN_Y) {
+                if (!willBePhantom) {
+                    continue;
+                }
+                double normAngle = rand.nextDouble() * 2.0 - 1.0;
+                double normDist = rand.nextDouble();
+                double[] offset = computeSpawnOffset(approachAngleRad, normAngle, normDist, surroundMode);
+                targetX = center.getX() + offset[0];
+                targetZ = center.getZ() + offset[1];
+                spawnY = center.getY();
+            }
 
             try {
                 Mob mob = null;
-                float roll = rand.nextFloat();
 
                 switch (phase) {
                     case PHASE_1A_FAST_ZOMBIES -> {
@@ -802,6 +955,7 @@ public class ChunkHeatManager {
                     try {
                         mob.finalizeSpawn(level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.EVENT, null);
                     } catch (Throwable ignored) {}
+                    applyHordeMobHealthScaling(mob);
                     level.addFreshEntity(mob);
                     if (isPhantom) {
                         ServerPlayer nearestSurvival = null;
@@ -860,11 +1014,13 @@ public class ChunkHeatManager {
         int finalWaveSize = computeFortifiedWaveCount(waveSize, fortified);
 
         HordePhase initialPhase = resolveHordePhase(0.0, stage);
-        int initialWaveCount = Math.max(8, finalWaveSize);
+        int initialWaveCount = Math.max(12, finalWaveSize);
         spawnPhasedSubWave(level, center, approachAngleRad, initialPhase, initialWaveCount, stage, fortified);
 
-        int subWaveCount = Math.max(6, finalWaveSize / 3);
+        int subWaveCount = computeSubWaveCount(finalWaveSize);
         tryRegisterHordeForGroup(center, groupPlayerIds, nearbyPlayers, subWaveCount, stage, approachAngleRad, fortified);
+
+        recruitNearbyWildMobsToHorde(level, center, GROUP_CLUSTER_RADIUS);
 
         if (fortified && level.players() != null) {
             for (ServerPlayer player : level.players()) {
@@ -921,7 +1077,8 @@ public class ChunkHeatManager {
                 if (canAwakenLateGameAmbientHorde(stage, overworld.getDefaultClockTime(), bloodmoon, canTrigger, inBreather)) {
                     float chance = bloodmoon ? 1.0f : 0.35f;
                     if (ambientRand.nextFloat() < chance) {
-                        double approachAngleRad = ambientRand.nextDouble() * 2.0 * Math.PI;
+                        double preferredAngleRad = ambientRand.nextDouble() * 2.0 * Math.PI;
+                        double approachAngleRad = selectDryApproachAngle(overworld, triggerPos, preferredAngleRad);
                         double roarX = player.getX() + Math.cos(approachAngleRad) * 45.0;
                         double roarZ = player.getZ() + Math.sin(approachAngleRad) * 45.0;
 
@@ -1020,7 +1177,11 @@ public class ChunkHeatManager {
                 spawnPhasedSubWave(overworld, horde.center, horde.approachAngleRad, phase, currentSubWaveCount, horde.worldStageNum, horde.surroundMode);
             }
 
-            if (horde.elapsedTicks % 300 == 0) {
+            if (horde.elapsedTicks % 100 == 0) {
+                recruitNearbyWildMobsToHorde(overworld, horde.center, GROUP_CLUSTER_RADIUS);
+            }
+
+            if (horde.elapsedTicks % 200 == 0) {
                 spawnPhasedSubWave(overworld, horde.center, horde.approachAngleRad, phase, currentSubWaveCount, horde.worldStageNum, horde.surroundMode);
             }
         }
@@ -1147,7 +1308,8 @@ public class ChunkHeatManager {
                     return;
                 }
 
-                double approachAngleRad = new Random().nextDouble() * 2.0 * Math.PI;
+                double preferredAngleRad = new Random().nextDouble() * 2.0 * Math.PI;
+                double approachAngleRad = selectDryApproachAngle(level, triggerPos, preferredAngleRad);
                 double roarX = x + Math.cos(approachAngleRad) * 45.0;
                 double roarZ = z + Math.sin(approachAngleRad) * 45.0;
 

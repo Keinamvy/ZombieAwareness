@@ -1,8 +1,6 @@
 package com.nll.nightmareesm.MobBehavs;
 
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.effect.MobEffectInstance;
-import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -23,17 +21,10 @@ public class MobBloodlust {
       if (this.isOnWhitelist(Entity_Class)) {
          LivingEntity Living_Entity = (LivingEntity)Entity_Class;
          Identifier Bloodlust_Identifier = Identifier.parse("bloodlust");
-         var healthAttr = Living_Entity.getAttribute(Attributes.MAX_HEALTH);
-         if (healthAttr != null && !healthAttr.hasModifier(Bloodlust_Identifier)) {
-            AttributeModifier Attr_Mod = new AttributeModifier(Bloodlust_Identifier, 0.5, Operation.ADD_MULTIPLIED_BASE);
-            healthAttr.addPermanentModifier(Attr_Mod);
-            Living_Entity.setHealth(Living_Entity.getHealth() + Living_Entity.getHealth() * 0.5F);
-         }
          var speedAttr = Living_Entity.getAttribute(Attributes.MOVEMENT_SPEED);
          if (speedAttr != null && !speedAttr.hasModifier(Bloodlust_Identifier)) {
             speedAttr.addPermanentModifier(new AttributeModifier(Bloodlust_Identifier, 0.25, Operation.ADD_MULTIPLIED_BASE));
          }
-         Living_Entity.addEffect(new MobEffectInstance(MobEffects.HEALTH_BOOST, 1000, 1));
       }
    }
 

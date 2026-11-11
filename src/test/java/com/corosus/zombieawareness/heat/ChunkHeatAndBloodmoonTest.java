@@ -677,4 +677,43 @@ public class ChunkHeatAndBloodmoonTest {
         assertFalse(ZAUtil.shouldHordeMobDropLoot(true, 0.80f), "Roll of 0.80f must not drop loot");
         assertFalse(ZAUtil.shouldHordeMobDropLoot(true, 0.99f), "Roll of 0.99f must not drop loot");
     }
+
+    @Test
+    public void hordeMobHealthReductionIncreasedParticipationAndWaterSpawnPrevention() {
+        // 1. Horde Mob Health Reduction & Juggernaut Capping (Bug 42 HP fix)
+        assertEquals(0.75, ChunkHeatManager.HORDE_MOB_HEALTH_MULTIPLIER, 0.001);
+        assertEquals(20.0, ChunkHeatManager.HORDE_JUGGERNAUT_MAX_HEALTH_CAP, 0.001);
+        assertEquals(15.0, ChunkHeatManager.computeHordeMobMaxHealth(20.0, false), 0.001,
+                "Regular 20 HP zombie must scale to 15 HP (reduced from 20 HP, and never 42 HP)");
+        assertEquals(20.0, ChunkHeatManager.computeHordeMobMaxHealth(20.0, true), 0.001,
+                "Juggernaut max health must cap at 20 HP");
+        assertEquals(20.0, ChunkHeatManager.computeHordeMobMaxHealth(42.0, true), 0.001,
+                "42 HP bloated Juggernaut must cap at 20 HP");
+        assertEquals(12.0, ChunkHeatManager.computeHordeMobMaxHealth(16.0, false), 0.001,
+                "16 HP spider must scale to 12 HP");
+        assertEquals(9.0, ChunkHeatManager.computeHordeMobMaxHealth(12.0, false), 0.001,
+                "12 HP cave spider must scale to 9 HP");
+        assertEquals(15.0, ChunkHeatManager.computeHordeMobMaxHealth(0.0, false), 0.001,
+                "<= 0 base health fallback must return 15.0 HP");
+
+        // 2. Increased Participation in Horde (Base 28, Squad/Stage scaling, SubWave 55%)
+        assertEquals(28, ChunkHeatManager.computeSquadScaledWaveSize(0, 1, 1, false),
+                "Base squad wave size with default 0 fallback must be 28");
+        assertEquals(55, ChunkHeatManager.computeSquadScaledWaveSize(28, 10, 1, false),
+                "Stage 10 solo wave size: 28 + (1-1)*6 + (10-1)*3 = 55");
+        assertEquals(110, ChunkHeatManager.computeSquadScaledWaveSize(28, 10, 1, true),
+                "Bloodmoon doubles Stage 10 wave size: 55 * 2 = 110");
+        assertEquals(73, ChunkHeatManager.computeSquadScaledWaveSize(28, 10, 4, false),
+                "Stage 10 4-player squad: 28 + 3*6 + 9*3 = 28 + 18 + 27 = 73");
+        assertEquals(16, ChunkHeatManager.computeSubWaveCount(28),
+                "Subwave count for wave 28: ceil(28 * 0.55) = ceil(15.4) = 16");
+        assertEquals(12, ChunkHeatManager.computeSubWaveCount(10),
+                "Subwave count floor must be 12");
+        assertEquals(31, ChunkHeatManager.computeSubWaveCount(55),
+                "Subwave count for wave 55: ceil(55 * 0.55) = ceil(30.25) = 31");
+
+        // 3. Water-Body Spawn Prevention Constants & Helpers
+        assertEquals(Integer.MIN_VALUE, ChunkHeatManager.NO_DRY_SPAWN_Y);
+        assertFalse(ChunkHeatManager.isDrySolidSpawnColumn(null, null, null));
+    }
 }

@@ -301,8 +301,34 @@ public class ZAPreProdTestMod implements ModInitializer {
             zombie.discard();
             skeleton.discard();
             creeper.discard();
+
+            // 42 Mob Health Bug Fix & Horde Mob Health Scaling Verification
+            Zombie bloodlustZombie = new Zombie(level);
+            bloodlustZombie.setPos(50.5, 100.0, 50.5);
+            level.addFreshEntity(bloodlustZombie);
+            assertCondition(bloodlustZombie.getMaxHealth() == 20.0f, "Base zombie max health must be 20.0f");
+            new com.nll.nightmareesm.MobBehavs.MobBloodlust(bloodlustZombie);
+            assertCondition(bloodlustZombie.getMaxHealth() <= 20.0f, "MobBloodlust must NOT increase zombie max health above 20 HP (got " + bloodlustZombie.getMaxHealth() + ", never 42 HP!)");
+            assertCondition(!bloodlustZombie.hasEffect(net.minecraft.world.effect.MobEffects.HEALTH_BOOST), "MobBloodlust must NOT apply HEALTH_BOOST");
+            assertCondition(bloodlustZombie.getAttribute(Attributes.MOVEMENT_SPEED).hasModifier(Identifier.parse("bloodlust")), "MobBloodlust must retain bloodlust speed modifier");
+            bloodlustZombie.discard();
+
+            Zombie hordeZombie = new Zombie(level);
+            hordeZombie.addTag("za_horde_mob");
+            ChunkHeatManager.applyHordeMobHealthScaling(hordeZombie);
+            assertCondition(hordeZombie.getMaxHealth() == 15.0f, "Horde zombie max health must be scaled to 15.0f (< 20.0f, got " + hordeZombie.getMaxHealth() + ")");
+            assertCondition(hordeZombie.getHealth() == 15.0f, "Horde zombie health must be set to 15.0f");
+
+            Zombie hordeJuggernaut = new Zombie(level);
+            nightmareesm.applyJuggernautLoadout(hordeJuggernaut);
+            hordeJuggernaut.addTag("za_horde_mob");
+            ChunkHeatManager.applyHordeMobHealthScaling(hordeJuggernaut);
+            assertCondition(hordeJuggernaut.getMaxHealth() == 20.0f, "Horde Juggernaut max health must be capped at 20.0f");
+            hordeZombie.discard();
+            hordeJuggernaut.discard();
+
             passed++;
-            LOGGER.info("[Test 7/10] PASS: NightmareESM stage gating, Juggernaut attributes, and Horde Unity (Creeper + Sapper TNT 0 friendly-fire) verified.");
+            LOGGER.info("[Test 7/10] PASS: NightmareESM stage gating, Juggernaut attributes, 42 HP Bloodlust fix, Horde Mob Health Scaling, and Horde Unity (Creeper + Sapper TNT 0 friendly-fire) verified.");
 
             // Test 8/10: EntityScent Lifecycle & Zombie AI Pathfinding
             LOGGER.info("[Test 8/10] Verifying EntityScent spawning, synched data, decay, and Zombie AI pathfinding...");
@@ -449,8 +475,41 @@ public class ZAPreProdTestMod implements ModInitializer {
             ChunkHeatManager.tryRegisterHordeForGroup(lockedPos, java.util.Collections.singleton(lockedPlayerId), 1, 6, 4);
             assertCondition(ChunkHeatManager.isPlayerLockedByHordeOrBloodmoon(lockedPlayerId, lockedPos, false), "Crimson Seal must lock portals while targeted by an active horde");
             ChunkHeatManager.clearAllHeat();
+
+            // Water-body spawn rejection on real ServerLevel & dry platform validation
+            BlockPos waterCenter = new BlockPos(80, 100, 80);
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    level.setBlockAndUpdate(waterCenter.offset(dx, -1, dz), Blocks.DIRT.defaultBlockState());
+                    level.setBlockAndUpdate(waterCenter.offset(dx, 0, dz), Blocks.WATER.defaultBlockState());
+                    level.setBlockAndUpdate(waterCenter.offset(dx, 1, dz), Blocks.AIR.defaultBlockState());
+                    level.setBlockAndUpdate(waterCenter.offset(dx, 2, dz), Blocks.AIR.defaultBlockState());
+                }
+            }
+            int waterSpawnY = ChunkHeatManager.findSafeDrySpawnY(level, waterCenter.getX(), waterCenter.getY(), waterCenter.getZ());
+            assertCondition(waterSpawnY == ChunkHeatManager.NO_DRY_SPAWN_Y, "findSafeDrySpawnY on water pool must return NO_DRY_SPAWN_Y, got " + waterSpawnY);
+
+            BlockPos dryCenter = new BlockPos(90, 100, 80);
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    level.setBlockAndUpdate(dryCenter.offset(dx, -1, dz), Blocks.STONE.defaultBlockState());
+                    level.setBlockAndUpdate(dryCenter.offset(dx, 0, dz), Blocks.AIR.defaultBlockState());
+                    level.setBlockAndUpdate(dryCenter.offset(dx, 1, dz), Blocks.AIR.defaultBlockState());
+                }
+            }
+            int drySpawnY = ChunkHeatManager.findSafeDrySpawnY(level, dryCenter.getX(), dryCenter.getY(), dryCenter.getZ());
+            assertCondition(drySpawnY == dryCenter.getY(), "findSafeDrySpawnY on dry stone platform must return valid dry Y (" + dryCenter.getY() + "), got " + drySpawnY);
+
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    level.setBlockAndUpdate(waterCenter.offset(dx, 0, dz), Blocks.AIR.defaultBlockState());
+                    level.setBlockAndUpdate(waterCenter.offset(dx, -1, dz), Blocks.AIR.defaultBlockState());
+                    level.setBlockAndUpdate(dryCenter.offset(dx, -1, dz), Blocks.AIR.defaultBlockState());
+                }
+            }
+
             passed++;
-            LOGGER.info("[Test 9/10] PASS: Directional Cone Spawning, Directional Roar (10% dist / 20% wall), and Crimson Seal Portal Lockdown verified.");
+            LOGGER.info("[Test 9/10] PASS: Directional Cone Spawning, Directional Roar, Crimson Seal Portal Lockdown, and Water-Body Spawn Rejection verified.");
 
             // Test 10/10: Audit Loophole Fixes (Multiplayer Target Lock, Screamer Clone Guard, Container/Bedrock Protection)
             LOGGER.info("[Test 10/10] Verifying Multiplayer Target Lock fix, Screamer Clone Guard, and Pickaxe Container/Bedrock protection...");
