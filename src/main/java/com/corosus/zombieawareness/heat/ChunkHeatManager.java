@@ -192,6 +192,30 @@ public class ChunkHeatManager {
         return groundSpawnY + 16;
     }
 
+    public static void announceHordeVictory(ServerLevel overworld, ActiveHorde horde, String message) {
+        if (overworld == null || horde == null) return;
+        Component text = Component.literal(message);
+        if (overworld.getServer() != null && overworld.getServer().getPlayerList() != null) {
+            for (ServerPlayer player : overworld.getServer().getPlayerList().getPlayers()) {
+                if (player != null) {
+                    boolean isTarget = horde.originalGroupPlayerIds.contains(player.getUUID()) || horde.targetGroupPlayerIds.contains(player.getUUID());
+                    boolean isNear = player.level() == overworld && player.distanceToSqr(horde.center.getX() + 0.5, horde.center.getY() + 0.5, horde.center.getZ() + 0.5) <= GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS * 2.25;
+                    if (isTarget || isNear) {
+                        player.sendSystemMessage(text);
+                        player.sendSystemMessage(text, true);
+                        try {
+                            overworld.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.PLAYERS, 1.2F, 1.0F);
+                        } catch (Throwable ignored) {
+                            try {
+                                overworld.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 1.2F, 1.0F);
+                            } catch (Throwable ignored2) {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     public static boolean isDaytime(Level level) {
         if (level == null) return false;
         long tod = ((level.getDefaultClockTime() % 24000L) + 24000L) % 24000L;
@@ -1303,6 +1327,8 @@ public class ChunkHeatManager {
                 toRemove.add(horde);
                 markGroupPostHordeBreather(horde.targetGroupPlayerIds, currentTick);
                 resetHeatAround(horde.center.getX(), horde.center.getZ(), currentTick);
+                disperseHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS, 1.0);
+                announceHordeVictory(overworld, horde, "\u00a7a\u00a7l[!] YOU HAVE SURVIVED THE HORDE! THE UNDEAD RETREAT!");
                 continue;
             }
 
@@ -1381,7 +1407,7 @@ public class ChunkHeatManager {
 
             long dayTime = overworld.getDefaultClockTime();
             long timeOfDay = ((dayTime % 24000L) + 24000L) % 24000L;
-            boolean isNightNow = (timeOfDay >= 13000L && timeOfDay <= 23500L);
+            boolean isNightNow = (timeOfDay >= 12000L && timeOfDay <= 23500L);
             boolean isBloodmoon = BloodmoonManager.isBloodmoonActive(overworld);
             if (isNightNow) {
                 horde.wasNight = true;
@@ -1401,14 +1427,7 @@ public class ChunkHeatManager {
                     markGroupPostHordeBreather(horde.targetGroupPlayerIds, currentTick);
                     resetHeatAround(horde.center.getX(), horde.center.getZ(), currentTick);
                     disperseHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS, 1.0);
-                    if (overworld.players() != null) {
-                        for (ServerPlayer player : overworld.players()) {
-                            if (player != null && (horde.originalGroupPlayerIds.contains(player.getUUID())
-                                    || player.distanceToSqr(horde.center.getX() + 0.5, horde.center.getY() + 0.5, horde.center.getZ() + 0.5) <= GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS)) {
-                                player.sendSystemMessage(Component.literal("\u00a7a\u00a7l[!] DAWN BREAKS \u2014 YOU HAVE SURVIVED THE NIGHT! THE HORDE RETREATS!"));
-                            }
-                        }
-                    }
+                    announceHordeVictory(overworld, horde, "\u00a7a\u00a7l[!] DAWN BREAKS \u2014 YOU HAVE SURVIVED THE NIGHT! THE HORDE RETREATS!");
                     continue;
                 }
             }
@@ -1418,19 +1437,12 @@ public class ChunkHeatManager {
                     horde.phase4InitialMobCount = Math.max(1, countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS));
                 }
                 int currentAlive = countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS);
-                if (isHordeDecimated(currentAlive, horde.phase4InitialMobCount)) {
+                if (isHordeDecimated(currentAlive, horde.phase4InitialMobCount) || currentAlive == 0) {
                     toRemove.add(horde);
                     markGroupPostHordeBreather(horde.targetGroupPlayerIds, currentTick);
                     resetHeatAround(horde.center.getX(), horde.center.getZ(), currentTick);
                     disperseHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS, 1.0);
-                    if (overworld.players() != null) {
-                        for (ServerPlayer player : overworld.players()) {
-                            if (player != null && (horde.originalGroupPlayerIds.contains(player.getUUID())
-                                    || player.distanceToSqr(horde.center.getX() + 0.5, horde.center.getY() + 0.5, horde.center.getZ() + 0.5) <= GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS)) {
-                                player.sendSystemMessage(Component.literal("§a§l[!] THE HORDE HAS BEEN OVERCOME (UNDER 2% REMAINING) — VICTORY IS YOURS!"));
-                            }
-                        }
-                    }
+                    announceHordeVictory(overworld, horde, "\u00a7a\u00a7l[!] THE HORDE HAS BEEN OVERCOME (UNDER 2% REMAINING) \u2014 VICTORY IS YOURS!");
                     continue;
                 }
             }
