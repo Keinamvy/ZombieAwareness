@@ -500,6 +500,29 @@ public class ZAPreProdTestMod implements ModInitializer {
             int drySpawnY = ChunkHeatManager.findSafeDrySpawnY(level, dryCenter.getX(), dryCenter.getY(), dryCenter.getZ());
             assertCondition(drySpawnY == dryCenter.getY(), "findSafeDrySpawnY on dry stone platform must return valid dry Y (" + dryCenter.getY() + "), got " + drySpawnY);
 
+            // Water spawn in surround mode & Zombie to Drowned conversion on ServerLevel
+            int surroundWaterY = ChunkHeatManager.findSafeWaterSpawnY(level, waterCenter.getX(), waterCenter.getY(), waterCenter.getZ());
+            assertCondition(surroundWaterY == waterCenter.getY(), "findSafeWaterSpawnY on water pool must return water surface Y (" + waterCenter.getY() + "), got " + surroundWaterY);
+
+            Zombie waterZombie = new Zombie(level);
+            waterZombie.addTag("za_horde_mob");
+            waterZombie.setPos(waterCenter.getX() + 0.5, waterCenter.getY(), waterCenter.getZ() + 0.5);
+            level.addFreshEntity(waterZombie);
+            assertCondition(waterZombie.entityTags().contains("za_horde_mob"), "Water zombie missing za_horde_mob tag");
+            net.minecraft.world.entity.monster.zombie.Drowned convertedDrowned = ChunkHeatManager.convertHordeZombieToDrowned(waterZombie);
+            assertCondition(convertedDrowned != null, "convertHordeZombieToDrowned must return converted Drowned");
+            assertCondition(convertedDrowned.entityTags().contains("za_horde_mob"), "Converted Drowned must retain za_horde_mob tag");
+            assertCondition(convertedDrowned.getMaxHealth() <= 20.0f, "Converted Drowned must have health scaling applied (<= 20 HP)");
+            convertedDrowned.discard();
+
+            // Compass direction & Phase 4 Decimation End checks
+            assertCondition("North".equals(ChunkHeatManager.getCompassDirectionFromAngle(-Math.PI / 2.0)), "Angle -PI/2 must be North");
+            assertCondition("East".equals(ChunkHeatManager.getCompassDirectionFromAngle(0.0)), "Angle 0.0 must be East");
+            assertCondition("South".equals(ChunkHeatManager.getCompassDirectionFromAngle(Math.PI / 2.0)), "Angle PI/2 must be South");
+            assertCondition("West".equals(ChunkHeatManager.getCompassDirectionFromAngle(Math.PI)), "Angle PI must be West");
+            assertCondition(ChunkHeatManager.isHordeDecimated(2, 100), "2 alive of 100 Phase 4 mobs must be decimated (2%)");
+            assertCondition(!ChunkHeatManager.isHordeDecimated(3, 100), "3 alive of 100 Phase 4 mobs must NOT be decimated (3%)");
+
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     level.setBlockAndUpdate(waterCenter.offset(dx, 0, dz), Blocks.AIR.defaultBlockState());
@@ -509,7 +532,7 @@ public class ZAPreProdTestMod implements ModInitializer {
             }
 
             passed++;
-            LOGGER.info("[Test 9/10] PASS: Directional Cone Spawning, Directional Roar, Crimson Seal Portal Lockdown, and Water-Body Spawn Rejection verified.");
+            LOGGER.info("[Test 9/10] PASS: Directional Cone Spawning, Directional Roar, Crimson Seal Portal Lockdown, Water Rejection, Island/Water Spawn, and Drowned Conversion verified.");
 
             // Test 10/10: Audit Loophole Fixes (Multiplayer Target Lock, Screamer Clone Guard, Container/Bedrock Protection)
             LOGGER.info("[Test 10/10] Verifying Multiplayer Target Lock fix, Screamer Clone Guard, and Pickaxe Container/Bedrock protection...");

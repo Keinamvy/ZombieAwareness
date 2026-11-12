@@ -715,5 +715,34 @@ public class ChunkHeatAndBloodmoonTest {
         // 3. Water-Body Spawn Prevention Constants & Helpers
         assertEquals(Integer.MIN_VALUE, ChunkHeatManager.NO_DRY_SPAWN_Y);
         assertFalse(ChunkHeatManager.isDrySolidSpawnColumn(null, null, null));
+        assertFalse(ChunkHeatManager.isWaterSpawnColumn(null, null));
+
+        // 4. Compass Direction Resolution (North = -Z, South = +Z, East = +X, West = -X)
+        assertEquals("East", ChunkHeatManager.getCompassDirectionFromAngle(0.0),
+                "Angle 0.0 (dx=1, dz=0) must resolve to East (+X)");
+        assertEquals("South", ChunkHeatManager.getCompassDirectionFromAngle(Math.PI / 2.0),
+                "Angle PI/2 (dx=0, dz=1) must resolve to South (+Z)");
+        assertEquals("West", ChunkHeatManager.getCompassDirectionFromAngle(Math.PI),
+                "Angle PI (dx=-1, dz=0) must resolve to West (-X)");
+        assertEquals("North", ChunkHeatManager.getCompassDirectionFromAngle(-Math.PI / 2.0),
+                "Angle -PI/2 (dx=0, dz=-1) must resolve to North (-Z)");
+        assertEquals("South-East", ChunkHeatManager.getCompassDirectionFromAngle(Math.PI / 4.0),
+                "Angle PI/4 (dx>0, dz>0) must resolve to South-East");
+        assertEquals("South-West", ChunkHeatManager.getCompassDirectionFromAngle(3.0 * Math.PI / 4.0),
+                "Angle 3*PI/4 (dx<0, dz>0) must resolve to South-West");
+        assertEquals("North-West", ChunkHeatManager.getCompassDirectionFromAngle(-3.0 * Math.PI / 4.0),
+                "Angle -3*PI/4 (dx<0, dz<0) must resolve to North-West");
+        assertEquals("North-East", ChunkHeatManager.getCompassDirectionFromAngle(-Math.PI / 4.0),
+                "Angle -PI/4 (dx>0, dz<0) must resolve to North-East");
+
+        // 5. Phase 4 Horde Decimation (<= 2% of Phase 4 start count)
+        assertFalse(ChunkHeatManager.isHordeDecimated(10, 0), "Invalid starting count <= 0 must return false");
+        assertTrue(ChunkHeatManager.isHordeDecimated(0, 100), "0 alive mobs is always decimated");
+        assertTrue(ChunkHeatManager.isHordeDecimated(2, 100), "2 mobs left of 100 is 2.0% -> decimated");
+        assertFalse(ChunkHeatManager.isHordeDecimated(3, 100), "3 mobs left of 100 is 3.0% -> NOT decimated");
+        assertTrue(ChunkHeatManager.isHordeDecimated(1, 50), "1 mob left of 50 is 2.0% -> decimated");
+        assertFalse(ChunkHeatManager.isHordeDecimated(2, 50), "2 mobs left of 50 is 4.0% -> NOT decimated");
+        assertTrue(ChunkHeatManager.isHordeDecimated(4, 200), "4 mobs left of 200 is 2.0% -> decimated");
+        assertFalse(ChunkHeatManager.isHordeDecimated(5, 200), "5 mobs left of 200 is 2.5% -> NOT decimated");
     }
 }

@@ -123,6 +123,13 @@ public final class nightmareesm implements ModInitializer {
             }
 
             if (Entity_Class instanceof Zombie zombie) {
+               if (!(zombie instanceof net.minecraft.world.entity.monster.zombie.Drowned) && zombie.entityTags().contains("za_horde_mob")) {
+                  if (zombie.isInWater() || zombie.isInShallowWater() || zombie.isUnderWater() || zombie.level().getFluidState(zombie.blockPosition()).is(net.minecraft.tags.FluidTags.WATER)) {
+                     com.corosus.zombieawareness.heat.ChunkHeatManager.convertHordeZombieToDrowned(zombie);
+                     return;
+                  }
+               }
+
                if (canUseBehaviorForStage("BLACKOUT_STALKER", currentStage)) {
                   MobBreakLightSources.tryBreakNearbyLight(zombie);
                }

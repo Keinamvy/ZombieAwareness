@@ -19,15 +19,20 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.ConversionParams;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Phantom;
 import net.minecraft.world.entity.monster.skeleton.AbstractSkeleton;
+import net.minecraft.world.entity.monster.zombie.Drowned;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
@@ -91,6 +96,7 @@ public class ChunkHeatManager {
         public boolean climaxRoarPlayed = false;
         public boolean apexPhaseTriggered = false;
         public boolean surroundMode = false;
+        public int phase4InitialMobCount = -1;
 
         public ActiveHorde(BlockPos center, Set<UUID> targetGroupPlayerIds, int totalDurationTicks, int subWaveCount, int worldStageNum, double approachAngleRad) {
             this.center = center;
@@ -292,6 +298,25 @@ public class ChunkHeatManager {
 
     public static double[] computeDirectionalSpawnOffset(double approachAngleRad, double normalizedAngleMinusOneToOne, double normalizedDistZeroToOne) {
         return computeSpawnOffset(approachAngleRad, normalizedAngleMinusOneToOne, normalizedDistZeroToOne, false);
+    }
+
+    public static String getCompassDirectionFromAngle(double angleRad) {
+        double dx = Math.cos(angleRad);
+        double dz = Math.sin(angleRad);
+        double compassDegrees = Math.toDegrees(Math.atan2(dx, -dz));
+        if (compassDegrees < 0) {
+            compassDegrees += 360.0;
+        }
+        int index = (int) Math.floor((compassDegrees + 22.5) / 45.0) & 7;
+        String[] directions = { "North", "North-East", "East", "South-East", "South", "South-West", "West", "North-West" };
+        return directions[index];
+    }
+
+    public static boolean isHordeDecimated(int currentAlive, int phase4StartingCount) {
+        if (phase4StartingCount <= 0) return false;
+        if (currentAlive <= 0) return true;
+        double ratio = (double) currentAlive / (double) phase4StartingCount;
+        return ratio <= 0.02 || currentAlive <= Math.max(1, (int) (phase4StartingCount * 0.02));
     }
 
     public static boolean canAwakenLateGameAmbientHorde(int worldStageNum, long dayTime, boolean isBloodmoon, boolean canTriggerForGroup, boolean inBreather) {
@@ -743,6 +768,73 @@ public class ChunkHeatManager {
         return preferredAngleRad;
     }
 
+    public static boolean isWaterSpawnColumn(BlockState feetState, BlockState headState) {
+        if (feetState == null || headState == null) return false;
+        return feetState.getFluidState().is(FluidTags.WATER) && (headState.isAir() || headState.getFluidState().is(FluidTags.WATER));
+    }
+
+    public static int findSafeWaterSpawnY(ServerLevel level, int x, int preferredY, int z) {
+        if (level == null) return NO_DRY_SPAWN_Y;
+        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
+        BlockPos feetPos = new BlockPos(x, surfaceY - 1, z);
+        BlockPos headPos = new BlockPos(x, surfaceY, z);
+        if (isWaterSpawnColumn(level.getBlockState(feetPos), level.getBlockState(headPos))) {
+            return surfaceY - 1;
+        }
+        return NO_DRY_SPAWN_Y;
+    }
+
+    public static Drowned convertHordeZombieToDrowned(Zombie zombie) {
+        if (zombie == null || zombie.isRemoved() || !(zombie.level() instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+        if (zombie instanceof Drowned) {
+            return (Drowned) zombie;
+        }
+        LivingEntity target = zombie.getTarget();
+        boolean isApex = zombie.entityTags().contains("za_apex_corrosive");
+        boolean isJuggernaut = zombie.entityTags().contains("za_juggernaut");
+        boolean isSapper = zombie.entityTags().contains("za_tnt_sapper");
+
+        Drowned drowned = zombie.convertTo(
+            EntityTypes.DROWNED,
+            ConversionParams.single(zombie, true, false),
+            EntitySpawnReason.CONVERSION,
+            (d) -> {
+                d.addTag("za_horde_mob");
+                if (isApex) d.addTag("za_apex_corrosive");
+                if (isJuggernaut) d.addTag("za_juggernaut");
+                if (isSapper) d.addTag("za_tnt_sapper");
+                applyHordeMobHealthScaling(d);
+                if (target != null && target.isAlive()) {
+                    d.setTarget(target);
+                }
+            }
+        );
+        if (drowned != null) {
+            serverLevel.playSound(null, drowned.getX(), drowned.getY(), drowned.getZ(),
+                    SoundEvents.ZOMBIE_CONVERTED_TO_DROWNED, SoundSource.HOSTILE, 2.0F, 1.0F);
+        }
+        return drowned;
+    }
+
+    public static int countAliveHordeMobsAround(ServerLevel level, BlockPos center, double radius) {
+        if (level == null || center == null || radius <= 0) return 0;
+        double radiusSq = radius * radius;
+        double cx = center.getX() + 0.5;
+        double cy = center.getY() + 0.5;
+        double cz = center.getZ() + 0.5;
+        int count = 0;
+        for (Entity entity : level.getAllEntities()) {
+            if (entity instanceof Mob mob && mob.isAlive()) {
+                if (mob.distanceToSqr(cx, cy, cz) <= radiusSq && mob.entityTags().contains("za_horde_mob")) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
     public static int recruitNearbyWildMobsToHorde(ServerLevel level, BlockPos center, double radius) {
         if (level == null || center == null || radius <= 0) return 0;
         double radiusSq = radius * radius;
@@ -828,6 +920,24 @@ public class ChunkHeatManager {
                 }
             }
 
+            boolean isWaterSpawn = false;
+            if (spawnY == NO_DRY_SPAWN_Y && surroundMode) {
+                for (int attempt = 0; attempt < 12; attempt++) {
+                    double sweepAngle = rand.nextDouble() * 2.0 * Math.PI;
+                    double sweepDist = 28.0 + rand.nextDouble() * 24.0;
+                    double candX = center.getX() + Math.cos(sweepAngle) * sweepDist;
+                    double candZ = center.getZ() + Math.sin(sweepAngle) * sweepDist;
+                    int waterY = findSafeWaterSpawnY(level, (int) candX, center.getY(), (int) candZ);
+                    if (waterY != NO_DRY_SPAWN_Y) {
+                        targetX = candX;
+                        targetZ = candZ;
+                        spawnY = waterY;
+                        isWaterSpawn = true;
+                        break;
+                    }
+                }
+            }
+
             if (spawnY == NO_DRY_SPAWN_Y) {
                 if (!willBePhantom) {
                     continue;
@@ -843,12 +953,17 @@ public class ChunkHeatManager {
             try {
                 Mob mob = null;
 
-                switch (phase) {
-                    case PHASE_1A_FAST_ZOMBIES -> {
-                        Zombie z = new Zombie(level);
-                        z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
-                        mob = z;
-                    }
+                if (isWaterSpawn) {
+                    Drowned drowned = new Drowned(EntityTypes.DROWNED, level);
+                    drowned.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                    mob = drowned;
+                } else {
+                    switch (phase) {
+                        case PHASE_1A_FAST_ZOMBIES -> {
+                            Zombie z = new Zombie(level);
+                            z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                            mob = z;
+                        }
                     case PHASE_1B_VENOM_SPIDERS -> {
                         if (roll < 0.65f) {
                             Zombie z = new Zombie(level);
@@ -940,6 +1055,7 @@ public class ChunkHeatManager {
                         }
                     }
                 }
+            }
 
                 if (mob != null) {
                     mob.addTag("za_horde_mob");
@@ -1025,7 +1141,14 @@ public class ChunkHeatManager {
         if (fortified && level.players() != null) {
             for (ServerPlayer player : level.players()) {
                 if (player != null && (groupPlayerIds.contains(player.getUUID()) || player.distanceToSqr(originX, originY, originZ) <= 64.0 * 64.0)) {
-                    player.sendSystemMessage(Component.literal("§4§l[!] THE HORDE HAS SURROUNDED YOUR FORTIFICATION — HOLD THE LINE!"));
+                    player.sendSystemMessage(Component.literal("§4§l[!] THE HORDE HAS SURROUNDED YOUR FORTIFICATION FROM ALL SIDES (NORTH, SOUTH, EAST, WEST) — HOLD THE LINE!"));
+                }
+            }
+        } else if (level.players() != null) {
+            String dir = getCompassDirectionFromAngle(approachAngleRad);
+            for (ServerPlayer player : level.players()) {
+                if (player != null && (groupPlayerIds.contains(player.getUUID()) || player.distanceToSqr(originX, originY, originZ) <= 64.0 * 64.0)) {
+                    player.sendSystemMessage(Component.literal("§4§l[!] HORDE ADVANCING FROM THE " + dir.toUpperCase(Locale.ROOT) + "!"));
                 }
             }
         }
@@ -1088,9 +1211,10 @@ public class ChunkHeatManager {
 
                         playHordeRoar(overworld, roarX, player.getY(), roarZ);
 
+                        String dir = getCompassDirectionFromAngle(approachAngleRad);
                         for (ServerPlayer p : overworld.players()) {
                             if (p != null && (groupPlayerIds.contains(p.getUUID()) || p.distanceToSqr(player.position()) <= 64.0 * 64.0)) {
-                                p.sendSystemMessage(Component.literal("§4§l[!] THE NIGHT CHILL CONDENSES — AN APEX SIEGE HORDE HAS AWAKENED!"));
+                                p.sendSystemMessage(Component.literal("§4§l[!] THE NIGHT CHILL CONDENSES — AN APEX SIEGE HORDE IS APPROACHING FROM THE " + dir.toUpperCase(Locale.ROOT) + "!"));
                             }
                         }
 
@@ -1168,6 +1292,15 @@ public class ChunkHeatManager {
                 horde.climaxRoarPlayed = true;
                 BlockPos staging = horde.getStagingOrigin();
                 playHordeRoar(overworld, staging.getX(), staging.getY(), staging.getZ());
+                String dir = getCompassDirectionFromAngle(horde.approachAngleRad);
+                if (overworld.players() != null) {
+                    for (ServerPlayer player : overworld.players()) {
+                        if (player != null && (horde.originalGroupPlayerIds.contains(player.getUUID())
+                                || player.distanceToSqr(horde.center.getX() + 0.5, horde.center.getY() + 0.5, horde.center.getZ() + 0.5) <= GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS)) {
+                            player.sendSystemMessage(Component.literal("§4§l[!] DEMOLITION SAPPERS ADVANCING FROM THE " + dir.toUpperCase(Locale.ROOT) + "!"));
+                        }
+                    }
+                }
             }
 
             if (phase == HordePhase.PHASE_5_APEX_CORROSION && !horde.apexPhaseTriggered) {
@@ -1175,6 +1308,44 @@ public class ChunkHeatManager {
                 BlockPos staging = horde.getStagingOrigin();
                 playHordeRoar(overworld, staging.getX(), staging.getY(), staging.getZ());
                 spawnPhasedSubWave(overworld, horde.center, horde.approachAngleRad, phase, currentSubWaveCount, horde.worldStageNum, horde.surroundMode);
+            }
+
+            if (phase.ordinal() >= HordePhase.PHASE_4_CLIMAX_SAPPERS.ordinal()) {
+                if (horde.phase4InitialMobCount < 0) {
+                    horde.phase4InitialMobCount = Math.max(1, countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS));
+                }
+                int currentAlive = countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS);
+                if (isHordeDecimated(currentAlive, horde.phase4InitialMobCount)) {
+                    toRemove.add(horde);
+                    markGroupPostHordeBreather(horde.targetGroupPlayerIds, currentTick);
+                    resetHeatAround(horde.center.getX(), horde.center.getZ(), currentTick);
+                    disperseHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS, 1.0);
+                    if (overworld.players() != null) {
+                        for (ServerPlayer player : overworld.players()) {
+                            if (player != null && (horde.originalGroupPlayerIds.contains(player.getUUID())
+                                    || player.distanceToSqr(horde.center.getX() + 0.5, horde.center.getY() + 0.5, horde.center.getZ() + 0.5) <= GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS)) {
+                                player.sendSystemMessage(Component.literal("§a§l[!] THE HORDE HAS BEEN OVERCOME (UNDER 2% REMAINING) — VICTORY IS YOURS!"));
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            if (horde.elapsedTicks % 20 == 0) {
+                double radiusSq = GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS;
+                double cx = horde.center.getX() + 0.5;
+                double cy = horde.center.getY() + 0.5;
+                double cz = horde.center.getZ() + 0.5;
+                for (Entity e : overworld.getAllEntities()) {
+                    if (e instanceof Zombie z && !(z instanceof Drowned) && z.isAlive() && z.entityTags().contains("za_horde_mob")) {
+                        if (z.distanceToSqr(cx, cy, cz) <= radiusSq) {
+                            if (z.isInWater() || z.isInShallowWater() || z.isUnderWater() || overworld.getFluidState(z.blockPosition()).is(FluidTags.WATER)) {
+                                convertHordeZombieToDrowned(z);
+                            }
+                        }
+                    }
+                }
             }
 
             if (horde.elapsedTicks % 100 == 0) {
@@ -1328,9 +1499,10 @@ public class ChunkHeatManager {
                 playHordeRoar(level, roarX, y, roarZ);
 
                 if (level.players() != null) {
+                    String dir = getCompassDirectionFromAngle(approachAngleRad);
                     for (ServerPlayer player : level.players()) {
                         if (player != null && (groupPlayerIds.contains(player.getUUID()) || player.distanceToSqr(x, y, z) <= 64.0 * 64.0)) {
-                            player.sendSystemMessage(Component.literal("§4§l[!] A MASSIVE HORDE HAS HEARD YOUR GUNFIRE — RUN!"));
+                            player.sendSystemMessage(Component.literal("§4§l[!] A MASSIVE HORDE IS APPROACHING FROM THE " + dir.toUpperCase(Locale.ROOT) + " — RUN!"));
                         }
                     }
                 }
