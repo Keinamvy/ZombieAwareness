@@ -365,12 +365,12 @@ public class ChunkHeatAndBloodmoonTest {
         assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(List.of(player1), 3601L), "Player 1 must be in breather");
         assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(List.of(player2), 3601L), "Player 2 must be in breather");
 
-        // Breather is 1800 ticks, so at tick 3600 + 1799 = 5399, still in breather
-        assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(group, 5399L), "Group must still be in breather at tick 5399");
+        // Breather is 4200 ticks (POST_HORDE_BREATHER_TICKS = 4200L = 3.5 minutes), so at tick 3600 + 4199 = 7799, still in breather
+        assertTrue(ChunkHeatManager.isGroupInPostHordeBreather(group, 7799L), "Group must still be in breather at tick 7799");
 
-        // At tick 3600 + 1800 = 5400, breather has expired
-        assertFalse(ChunkHeatManager.isGroupInPostHordeBreather(group, 5400L), "Breather must expire at tick 5400");
-        assertFalse(ChunkHeatManager.isGroupInPostHordeBreather(group, 5401L), "Breather must be expired at tick 5401");
+        // At tick 3600 + 4200 = 7800, breather has expired
+        assertFalse(ChunkHeatManager.isGroupInPostHordeBreather(group, 7800L), "Breather must expire at tick 7800");
+        assertFalse(ChunkHeatManager.isGroupInPostHordeBreather(group, 7801L), "Breather must be expired at tick 7801");
 
         // clearAllHeat also clears breather
         ChunkHeatManager.markGroupPostHordeBreather(group, 6000L);
@@ -744,5 +744,47 @@ public class ChunkHeatAndBloodmoonTest {
         assertFalse(ChunkHeatManager.isHordeDecimated(2, 50), "2 mobs left of 50 is 4.0% -> NOT decimated");
         assertTrue(ChunkHeatManager.isHordeDecimated(4, 200), "4 mobs left of 200 is 2.0% -> decimated");
         assertFalse(ChunkHeatManager.isHordeDecimated(5, 200), "5 mobs left of 200 is 2.5% -> NOT decimated");
+    }
+
+    @Test
+    public void dawnVictoryConditionDaytimeGunfireHeatReductionAndPhantomParatroopers() {
+        // 1. Daytime vs Night Gunfire Heat Rates
+        assertEquals(10, ChunkHeatManager.computeGunfireHeatAmount(true, false),
+                "Daytime unsuppressed gunfire must accumulate 10 heat (reduced from 25)");
+        assertEquals(2, ChunkHeatManager.computeGunfireHeatAmount(true, true),
+                "Daytime suppressed gunfire must accumulate 2 heat (reduced from 4)");
+        assertEquals(25, ChunkHeatManager.computeGunfireHeatAmount(false, false),
+                "Night unsuppressed gunfire must accumulate full 25 heat");
+        assertEquals(4, ChunkHeatManager.computeGunfireHeatAmount(false, true),
+                "Night suppressed gunfire must accumulate 4 heat");
+
+        // 2. Extended Post-Horde Breather Cooldown
+        assertEquals(4200L, ChunkHeatManager.POST_HORDE_BREATHER_TICKS,
+                "POST_HORDE_BREATHER_TICKS must be extended to 4200 ticks (210s / 3.5 mins)");
+
+        // 3. Dawn Victory Condition Logic (isDawnArrival)
+        // If not preceded by night -> false
+        assertFalse(ChunkHeatManager.isDawnArrival(false, 0L, false), "wasNight=false must not trigger dawn victory");
+        assertFalse(ChunkHeatManager.isDawnArrival(false, 6000L, false), "wasNight=false at noon must not trigger dawn victory");
+
+        // If Bloodmoon is active -> dawn never arrives / victory inhibited
+        assertFalse(ChunkHeatManager.isDawnArrival(true, 0L, true), "Bloodmoon active must inhibit dawn victory");
+        assertFalse(ChunkHeatManager.isDawnArrival(true, 6000L, true), "Bloodmoon active at noon must inhibit dawn victory");
+
+        // Preceded by night, no Bloodmoon:
+        // Day window: 0 <= dayTime < 12000 ticks (or >= 23500 ticks) -> true
+        assertTrue(ChunkHeatManager.isDawnArrival(true, 0L, false), "Tick 0 (dawn) must trigger dawn victory");
+        assertTrue(ChunkHeatManager.isDawnArrival(true, 1000L, false), "Tick 1000 (morning) must trigger dawn victory");
+        assertTrue(ChunkHeatManager.isDawnArrival(true, 6000L, false), "Tick 6000 (midday) must trigger dawn victory");
+        assertTrue(ChunkHeatManager.isDawnArrival(true, 11999L, false), "Tick 11999 (pre-dusk) must trigger dawn victory");
+
+        // Night window: 12000 <= dayTime < 23500 -> false
+        assertFalse(ChunkHeatManager.isDawnArrival(true, 12000L, false), "Tick 12000 (dusk) must NOT trigger dawn victory");
+        assertFalse(ChunkHeatManager.isDawnArrival(true, 18000L, false), "Tick 18000 (midnight) must NOT trigger dawn victory");
+        assertFalse(ChunkHeatManager.isDawnArrival(true, 23499L, false), "Tick 23499 (pre-dawn) must NOT trigger dawn victory");
+
+        // 4. Phantom Aerial Passenger Safety
+        assertFalse(ChunkHeatManager.checkAndDropPhantomPassenger(null, null),
+                "Null phantom and target handled safely returning false");
     }
 }

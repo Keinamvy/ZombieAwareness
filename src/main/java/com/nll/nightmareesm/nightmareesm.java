@@ -88,7 +88,7 @@ public final class nightmareesm implements ModInitializer {
          case "SCREAMER_SCOUT":
             return stageNumber >= 7;
          case "BRIDGE_PILLAR":
-            return stageNumber >= 8;
+            return false;
          case "JUGGERNAUT_CRAWLER":
             return stageNumber >= 9;
          case "TNT_SAPPER":
@@ -171,10 +171,6 @@ public final class nightmareesm implements ModInitializer {
                   }
                }
 
-               if (canUseBehaviorForStage("BRIDGE_PILLAR", currentStage) && (Boolean)ESMConfig.AllowZombieBuilding.get()) {
-                  new MobBuildUp(Entity_Mob);
-                  new MobBuildBridge(Entity_Mob);
-               }
 
                if (canUseBehaviorForStage("TNT_SAPPER", currentStage) && (Boolean)ESMConfig.ZombiesLayTNT.get()) {
                   new MobPlaceTNT(Entity_Class);
@@ -183,6 +179,18 @@ public final class nightmareesm implements ModInitializer {
                if (canUseBehaviorForStage("START_FIRES", currentStage) && (Boolean)ESMConfig.ZombiesLightFires.get()) {
                   Mob Mob_Class = (Monster)Entity_Class;
                   new MobStartFires(Mob_Class);
+               }
+            }
+
+            if (Entity_Class instanceof net.minecraft.world.entity.monster.Phantom phantom
+                  && !phantom.getPassengers().isEmpty()
+                  && phantom.entityTags().contains("za_horde_mob")) {
+               net.minecraft.world.entity.LivingEntity target = phantom.getTarget();
+               if (target == null && phantom.level() instanceof net.minecraft.server.level.ServerLevel sl) {
+                  target = sl.getNearestPlayer(phantom, 96.0);
+               }
+               if (target != null) {
+                  com.corosus.zombieawareness.heat.ChunkHeatManager.checkAndDropPhantomPassenger(phantom, target);
                }
             }
 

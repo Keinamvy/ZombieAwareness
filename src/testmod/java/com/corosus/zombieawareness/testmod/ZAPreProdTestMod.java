@@ -152,16 +152,20 @@ public class ZAPreProdTestMod implements ModInitializer {
             ChunkHeatManager.clearAllHeat();
             ZDayProgressionManager.setForcedWorldDay(4); // Stage 2 (Day 4+) required for heat trigger
 
+            boolean isDay = ChunkHeatManager.isDaytime(level);
+            int silencedUnit = ChunkHeatManager.computeGunfireHeatAmount(isDay, true);
+            int unsuppressedUnit = ChunkHeatManager.computeGunfireHeatAmount(isDay, false);
+
             ChunkHeatManager.onTaCZGunSound(level, 0.0, 100.0, 0.0, 20, "silence");
             int silencedHeat = ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime());
-            assertCondition(silencedHeat == 4, "Expected silenced shot heat to be 4 (+4 heat), got: " + silencedHeat);
+            assertCondition(silencedHeat == silencedUnit, "Expected silenced shot heat to be " + silencedUnit + ", got: " + silencedHeat);
 
             ChunkHeatManager.onTaCZGunSound(level, 0.0, 100.0, 0.0, 64, "shoot");
             int combinedHeat = ChunkHeatManager.getHeatAtBlockPos(0, 0, level.getGameTime());
-            assertCondition(combinedHeat == 29, "Expected heat after silenced (+4) and unsuppressed (+25) shot to be 29, got: " + combinedHeat);
+            assertCondition(combinedHeat == (silencedUnit + unsuppressedUnit), "Expected heat after silenced and unsuppressed shot to be " + (silencedUnit + unsuppressedUnit) + ", got: " + combinedHeat);
 
-            // 3 more unsuppressed gunfire events (+75 heat) -> triggers ActiveHorde and resets local heat to 0!
-            for (int i = 0; i < 3; i++) {
+            // Fire enough unsuppressed shots to reach >= 100 heat -> triggers ActiveHorde and resets local heat to 0!
+            while (ChunkHeatManager.getActiveHordeCount() == 0) {
                 ChunkHeatManager.onTaCZGunSound(level, 0.0, 100.0, 0.0, 64, "shoot");
             }
             assertCondition(ChunkHeatManager.getActiveHordeCount() == 1, "Expected 1 ActiveHorde registered for Group 1, count=" + ChunkHeatManager.getActiveHordeCount());
@@ -179,10 +183,21 @@ public class ZAPreProdTestMod implements ModInitializer {
             assertCondition(group2Registered, "Group 2 (>96m away) must be allowed to trigger their own horde");
             assertCondition(ChunkHeatManager.getActiveHordeCount() == 2, "2 distinct groups must have 2 active hordes, got: " + ChunkHeatManager.getActiveHordeCount());
 
-            // Verify 90s (1800 ticks) Post-Horde Breather Cooldown
+            // Verify 210s (4200 ticks = 3.5 minutes) Post-Horde Breather Cooldown
             ChunkHeatManager.markGroupPostHordeBreather(java.util.Collections.singleton(group2SoloPlayer), 5000L);
             assertCondition(ChunkHeatManager.isGroupInPostHordeBreather(java.util.Collections.singleton(group2SoloPlayer), 5001L), "Group must be in breather at tick 5001");
-            assertCondition(!ChunkHeatManager.isGroupInPostHordeBreather(java.util.Collections.singleton(group2SoloPlayer), 6801L), "Group breather must expire after 1800 ticks");
+            assertCondition(ChunkHeatManager.isGroupInPostHordeBreather(java.util.Collections.singleton(group2SoloPlayer), 5000L + ChunkHeatManager.POST_HORDE_BREATHER_TICKS - 1L), "Group must still be in breather right before expiry");
+            assertCondition(!ChunkHeatManager.isGroupInPostHordeBreather(java.util.Collections.singleton(group2SoloPlayer), 5000L + ChunkHeatManager.POST_HORDE_BREATHER_TICKS + 1L), "Group breather must expire after 4200 ticks");
+
+            // Daytime gunfire heat reduction & Dawn victory logic
+            assertCondition(ChunkHeatManager.computeGunfireHeatAmount(true, false) == 10, "Daytime unsuppressed gunfire must produce 10 heat");
+            assertCondition(ChunkHeatManager.computeGunfireHeatAmount(true, true) == 2, "Daytime suppressed gunfire must produce 2 heat");
+            assertCondition(ChunkHeatManager.computeGunfireHeatAmount(false, false) == 25, "Night unsuppressed gunfire must produce 25 heat");
+            assertCondition(ChunkHeatManager.computeGunfireHeatAmount(false, true) == 4, "Night suppressed gunfire must produce 4 heat");
+            assertCondition(ChunkHeatManager.isDawnArrival(true, 0L, false), "Dawn tick 0 must trigger dawn victory");
+            assertCondition(!ChunkHeatManager.isDawnArrival(false, 0L, false), "wasNight=false must not trigger dawn victory");
+            assertCondition(!ChunkHeatManager.isDawnArrival(true, 18000L, false), "Midnight must not trigger dawn victory");
+            assertCondition(!ChunkHeatManager.isDawnArrival(true, 0L, true), "Bloodmoon dawn must not trigger dawn victory");
 
             assertCondition(ChunkHeatManager.computeHordeDurationTicks(1) == 3600, "1 player horde duration must be 3600 ticks (3 mins)");
             assertCondition(ChunkHeatManager.computeHordeDurationTicks(3) == 4800, "3 players horde duration must be 4800 ticks (4 mins)");
@@ -265,6 +280,7 @@ public class ZAPreProdTestMod implements ModInitializer {
             assertCondition(nightmareesm.canUseBehaviorForStage("BLACKOUT_STALKER", 3), "Blackout Stalker must be unlocked at Stage 3");
             assertCondition(!nightmareesm.canUseBehaviorForStage("CREEPER_BREACH", 9), "Creeper Breach must be locked at Stage 9");
             assertCondition(nightmareesm.canUseBehaviorForStage("CREEPER_BREACH", 10), "Creeper Breach must be unlocked at Stage 10");
+            assertCondition(!nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 8), "Mob building/bridging must be disabled at all stages per user request");
 
             Zombie testJuggernaut = new Zombie(level);
             nightmareesm.applyJuggernautLoadout(testJuggernaut);
@@ -398,9 +414,33 @@ public class ZAPreProdTestMod implements ModInitializer {
             assertCondition(ChunkHeatManager.computePhantomSpawnY(64) == 80, "Phantom spawn Y must be ground + 16");
             EntityType<?> phantomType = BuiltInRegistries.ENTITY_TYPE.getValue(Identifier.withDefaultNamespace("phantom"));
             assertCondition(phantomType != null, "Phantom entity type must exist in BuiltInRegistries");
-            net.minecraft.world.entity.Entity phantomEntity = phantomType.create(level, EntitySpawnReason.EVENT);
+            net.minecraft.world.entity.monster.Phantom phantomEntity = (net.minecraft.world.entity.monster.Phantom) phantomType.create(level, EntitySpawnReason.EVENT);
             assertCondition(phantomEntity != null, "Phantom entity must be instantiated successfully");
+
+            // Verify Phantom Paratrooper Drop onto player/ground target
+            phantomEntity.setPos(50.0, 110.0, 50.0);
+            Zombie paratrooper = new Zombie(level);
+            paratrooper.setPos(50.0, 110.0, 50.0);
+            paratrooper.addTag("za_horde_mob");
+            paratrooper.addTag("za_airdrop_passenger");
+            level.addFreshEntity(phantomEntity);
+            level.addFreshEntity(paratrooper);
+            paratrooper.startRiding(phantomEntity);
+            assertCondition(phantomEntity.getPassengers().contains(paratrooper), "Paratrooper must be riding phantom");
+
+            Zombie groundTarget = new Zombie(level);
+            groundTarget.setPos(50.0, 100.0, 50.0);
+            level.addFreshEntity(groundTarget);
+
+            boolean dropped = ChunkHeatManager.checkAndDropPhantomPassenger(phantomEntity, groundTarget);
+            assertCondition(dropped, "checkAndDropPhantomPassenger must return true when phantom is over target");
+            assertCondition(phantomEntity.getPassengers().isEmpty(), "Phantom passengers must be emptied upon drop");
+            assertCondition(paratrooper.hasEffect(net.minecraft.world.effect.MobEffects.SLOW_FALLING), "Paratrooper must receive SLOW_FALLING effect");
+            assertCondition(paratrooper.getDeltaMovement().y < 0.0, "Paratrooper must have downward vertical velocity");
+
             phantomEntity.discard();
+            paratrooper.discard();
+            groundTarget.discard();
 
             // Horde Mob Loot Drop Reduction (80% drop reduction)
             assertCondition(ZAUtil.shouldHordeMobDropLoot(false, 0.99f), "Non-horde mobs must always drop loot");

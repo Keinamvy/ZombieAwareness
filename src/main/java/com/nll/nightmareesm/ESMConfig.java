@@ -81,7 +81,7 @@ public class ESMConfig {
    public static final IntValue ZombieTNTDistance = new IntValue("zombietntdistance", "How close zombies need to be to player to allow setting TNT. Default=4 blocks.", 4);
    public static final BooleanValue AllowZombieGriefing = new BooleanValue("iszombiegriefing", "Allow Zombies To Destroy Blocks?", true);
    public static final BooleanValue AllowZombieGriefingOnlyIfPickaxe = new BooleanValue("iszombiedigifpickaxeonly", "If true, zombies can only destroy blocks if they have a pickaxe.", false);
-   public static final BooleanValue AllowZombieBuilding = new BooleanValue("iszombiebuilding", "Allow Zombies To Place Blocks?", true);
+   public static final BooleanValue AllowZombieBuilding = new BooleanValue("iszombiebuilding", "Allow Zombies To Place Blocks?", false);
    public static final DoubleValue ZombieDigHeightDistance = new DoubleValue("zombiedigheightdistance", "If the height distance (mob to player) less than this #, mob will start digging.", 16.0);
    public static final DoubleValue ZombieDigProximity = new DoubleValue("zombiedigproximity", "If entity is within circle defined by XZ proximity to target, start digging.", 8.0);
    public static final BooleanValue isCreeperBreachingAllowed = new BooleanValue("iscreeperbreaching", "Can Creepers Breach Walls?", true);

@@ -64,7 +64,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class ChunkHeatManager {
 
     public static final int MAX_CHUNK_HEAT = 150;
-    public static final long POST_HORDE_BREATHER_TICKS = 1800L;
+    public static final long POST_HORDE_BREATHER_TICKS = 4200L;
     public static final long CORPSE_RUN_GRACE_TICKS = 3600L;
     public static final double GROUP_CLUSTER_RADIUS = 96.0;
     public static final double HORDE_MOB_HEALTH_MULTIPLIER = 0.75;
@@ -97,6 +97,7 @@ public class ChunkHeatManager {
         public boolean apexPhaseTriggered = false;
         public boolean surroundMode = false;
         public int phase4InitialMobCount = -1;
+        public boolean wasNight = false;
 
         public ActiveHorde(BlockPos center, Set<UUID> targetGroupPlayerIds, int totalDurationTicks, int subWaveCount, int worldStageNum, double approachAngleRad) {
             this.center = center;
@@ -189,6 +190,58 @@ public class ChunkHeatManager {
 
     public static int computePhantomSpawnY(int groundSpawnY) {
         return groundSpawnY + 16;
+    }
+
+    public static boolean isDaytime(Level level) {
+        if (level == null) return false;
+        long tod = ((level.getDefaultClockTime() % 24000L) + 24000L) % 24000L;
+        return tod < 12000L || tod > 23500L;
+    }
+
+    public static boolean isDawnArrival(boolean wasNight, long dayTime, boolean bloodmoonActive) {
+        if (bloodmoonActive || !wasNight) return false;
+        long timeOfDay = ((dayTime % 24000L) + 24000L) % 24000L;
+        return timeOfDay < 12000L || timeOfDay > 23500L;
+    }
+
+    public static int computeGunfireHeatAmount(boolean isDay, boolean suppressed) {
+        if (suppressed) {
+            return isDay ? 2 : 4;
+        } else {
+            return isDay ? 10 : 25;
+        }
+    }
+
+    public static boolean checkAndDropPhantomPassenger(Phantom phantom, LivingEntity target) {
+        if (phantom == null || !phantom.isAlive() || phantom.getPassengers().isEmpty()) {
+            return false;
+        }
+        if (target == null || !target.isAlive()) {
+            return false;
+        }
+        double dx = phantom.getX() - target.getX();
+        double dz = phantom.getZ() - target.getZ();
+        double horizontalDist = Math.hypot(dx, dz);
+        double dy = phantom.getY() - target.getY();
+
+        if (horizontalDist <= 4.5 && dy >= 2.0 && dy <= 28.0) {
+            for (Entity passenger : new ArrayList<>(phantom.getPassengers())) {
+                passenger.stopRiding();
+                if (passenger instanceof LivingEntity living) {
+                    living.addEffect(new MobEffectInstance(MobEffects.SLOW_FALLING, 80, 0, false, false));
+                    living.setDeltaMovement(0.0, -0.4, 0.0);
+                    if (living instanceof Mob m) {
+                        m.setTarget(target);
+                    }
+                }
+            }
+            if (phantom.level() instanceof ServerLevel serverLevel) {
+                serverLevel.playSound(null, phantom.getX(), phantom.getY(), phantom.getZ(),
+                        SoundEvents.PHANTOM_BITE, SoundSource.HOSTILE, 2.0F, 0.8F);
+            }
+            return true;
+        }
+        return false;
     }
 
     public static double computeHordeMobMaxHealth(double baseMaxHealth, boolean isJuggernaut) {
@@ -1090,6 +1143,22 @@ public class ChunkHeatManager {
                         if (nearestSurvival != null) {
                             mob.setTarget(nearestSurvival);
                         }
+                        Mob passenger = level.getRandom().nextBoolean() ? (Mob) createMobById(level, "creeper") : new Zombie(level);
+                        if (passenger != null) {
+                            passenger.addTag("za_horde_mob");
+                            passenger.addTag("za_airdrop_passenger");
+                            passenger.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 7200, 0, false, false));
+                            passenger.setPos(targetX, actualY, targetZ);
+                            try {
+                                passenger.finalizeSpawn(level, level.getCurrentDifficultyAt(passenger.blockPosition()), EntitySpawnReason.EVENT, null);
+                            } catch (Throwable ignored) {}
+                            applyHordeMobHealthScaling(passenger);
+                            level.addFreshEntity(passenger);
+                            passenger.startRiding(mob);
+                            if (nearestSurvival != null) {
+                                passenger.setTarget(nearestSurvival);
+                            }
+                        }
                     }
                     try {
                         CoroUtilPath.tryMoveToXYZLongDist(mob, center.getX(), center.getY(), center.getZ(), 1.0);
@@ -1310,6 +1379,40 @@ public class ChunkHeatManager {
                 spawnPhasedSubWave(overworld, horde.center, horde.approachAngleRad, phase, currentSubWaveCount, horde.worldStageNum, horde.surroundMode);
             }
 
+            long dayTime = overworld.getDefaultClockTime();
+            long timeOfDay = ((dayTime % 24000L) + 24000L) % 24000L;
+            boolean isNightNow = (timeOfDay >= 13000L && timeOfDay <= 23500L);
+            boolean isBloodmoon = BloodmoonManager.isBloodmoonActive(overworld);
+            if (isNightNow) {
+                horde.wasNight = true;
+            }
+            if (isDawnArrival(horde.wasNight, dayTime, isBloodmoon)) {
+                boolean anyPlayerAlive = false;
+                if (overworld.players() != null) {
+                    for (ServerPlayer player : overworld.players()) {
+                        if (player != null && horde.targetGroupPlayerIds.contains(player.getUUID()) && player.isAlive() && !player.isDeadOrDying()) {
+                            anyPlayerAlive = true;
+                            break;
+                        }
+                    }
+                }
+                if (anyPlayerAlive) {
+                    toRemove.add(horde);
+                    markGroupPostHordeBreather(horde.targetGroupPlayerIds, currentTick);
+                    resetHeatAround(horde.center.getX(), horde.center.getZ(), currentTick);
+                    disperseHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS, 1.0);
+                    if (overworld.players() != null) {
+                        for (ServerPlayer player : overworld.players()) {
+                            if (player != null && (horde.originalGroupPlayerIds.contains(player.getUUID())
+                                    || player.distanceToSqr(horde.center.getX() + 0.5, horde.center.getY() + 0.5, horde.center.getZ() + 0.5) <= GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS)) {
+                                player.sendSystemMessage(Component.literal("\u00a7a\u00a7l[!] DAWN BREAKS \u2014 YOU HAVE SURVIVED THE NIGHT! THE HORDE RETREATS!"));
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+
             if (phase.ordinal() >= HordePhase.PHASE_4_CLIMAX_SAPPERS.ordinal()) {
                 if (horde.phase4InitialMobCount < 0) {
                     horde.phase4InitialMobCount = Math.max(1, countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS));
@@ -1329,6 +1432,26 @@ public class ChunkHeatManager {
                         }
                     }
                     continue;
+                }
+            }
+
+            if (horde.elapsedTicks % 10 == 0) {
+                double radiusSq = GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS;
+                double cx = horde.center.getX() + 0.5;
+                double cy = horde.center.getY() + 0.5;
+                double cz = horde.center.getZ() + 0.5;
+                for (Entity e : overworld.getAllEntities()) {
+                    if (e instanceof Phantom phantom && phantom.isAlive() && !phantom.getPassengers().isEmpty() && phantom.entityTags().contains("za_horde_mob")) {
+                        if (phantom.distanceToSqr(cx, cy, cz) <= radiusSq) {
+                            LivingEntity target = phantom.getTarget();
+                            if (target == null) {
+                                target = overworld.getNearestPlayer(phantom, 96.0);
+                            }
+                            if (target != null) {
+                                checkAndDropPhantomPassenger(phantom, target);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1377,7 +1500,8 @@ public class ChunkHeatManager {
                 if (ZDayProgressionManager.isStageUnlocked(2)) {
                     int threshold = ZAConfigZDay.chunkHeatThreshold;
                     int currentHeat = getHeatAtBlockPos((int) x, (int) z, 0L);
-                    int heatToAdd = Math.min(4, Math.max(0, (threshold - 1) - currentHeat));
+                int heatUnit = computeGunfireHeatAmount(isDaytime(level), true);
+                int heatToAdd = Math.min(heatUnit, Math.max(0, (threshold - 1) - currentHeat));
                     if (heatToAdd > 0) {
                         addHeatAtBlockPos((int) x, (int) z, heatToAdd, 0L);
                         clampHeatAround((int) x, (int) z, threshold - 1);
@@ -1404,7 +1528,8 @@ public class ChunkHeatManager {
                 long gameTick = level.getGameTime();
                 int threshold = ZAConfigZDay.chunkHeatThreshold;
                 int currentHeat = getHeatAtBlockPos((int) x, (int) z, gameTick);
-                int heatToAdd = Math.min(4, Math.max(0, (threshold - 1) - currentHeat));
+                int heatUnit = computeGunfireHeatAmount(isDaytime(level), true);
+                int heatToAdd = Math.min(heatUnit, Math.max(0, (threshold - 1) - currentHeat));
                 if (heatToAdd > 0) {
                     addHeatAtBlockPos((int) x, (int) z, heatToAdd, gameTick);
                     clampHeatAround((int) x, (int) z, threshold - 1);
@@ -1443,7 +1568,8 @@ public class ChunkHeatManager {
         }
 
         long gameTick = level.getGameTime();
-        int currentHeat = addHeatAtBlockPos((int) x, (int) z, 25, gameTick);
+        int heatToAdd = computeGunfireHeatAmount(isDaytime(level), false);
+        int currentHeat = addHeatAtBlockPos((int) x, (int) z, heatToAdd, gameTick);
         checkAndTriggerHorde(level, x, y, z, currentHeat, gameTick);
     }
 
