@@ -10,48 +10,47 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Creeper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class CreeperBreachWalls {
-   private static final Logger LOGGER = LoggerFactory.getLogger("CreeperBreachWalls");
    private static final Map<Creeper, Integer> TICK_MAP = Collections.synchronizedMap(new WeakHashMap<>());
    public boolean Debug_ExplodeImmediately = false;
 
    public CreeperBreachWalls(Creeper C) {
+      if (this.Debug_ExplodeImmediately) {
+         CreeperExplode.ignite(C);
+      } else {
+         tick(C);
+      }
+   }
+
+   public static void tick(Creeper C) {
       if (C == null) {
          return;
       }
-      if (this.Debug_ExplodeImmediately) {
-         new CreeperExplode(C);
-      } else {
-         Entity Creeper_Target = C.getTarget();
-         if (Creeper_Target != null) {
-            Entity Creeper_Entity = C;
-            if (Creeper_Target instanceof ServerPlayer Plyr && MobInfo.isSameDimension(C, Plyr)) {
-               if (!Plyr.isCreative() && !Plyr.isSpectator()) {
-                  float Dist_To_Tgt = C.distanceTo(Creeper_Target);
-                  boolean isCloseEnough = Dist_To_Tgt < ((Integer)ESMConfig.CreeperBreachingDistance.get()).intValue();
-                  int Ticks = this.GetTicks(C);
-                  if (!this.isAtWall(Creeper_Entity) && !this.isWithinStrikingDistance(C, Plyr)) {
-                     this.ResetTicks(C);
-                  } else if (isCloseEnough) {
-                     C.lookAt(Plyr, 30.0F, 30.0F);
-                     this.IncTicks(C);
-                     if (Ticks > (Integer)ESMConfig.CreeperObstructedExplodeTicks.get()) {
-                        new CreeperExplode(C);
-                     }
-                  } else {
-                     this.ResetTicks(C);
-                  }
-
-                  if (this.isHoveringAbove(C, Plyr)) {
-                     new CreeperExplode(C);
-                  }
-               } else {
-                  this.ResetTicks(C);
+      Entity creeperTarget = C.getTarget();
+      if (creeperTarget instanceof ServerPlayer plyr && MobInfo.isSameDimension(C, plyr)) {
+         if (!plyr.isCreative() && !plyr.isSpectator()) {
+            float distSq = (float)C.distanceToSqr(plyr);
+            int breachDist = (Integer)ESMConfig.CreeperBreachingDistance.get();
+            boolean isCloseEnough = distSq < (float)(breachDist * breachDist);
+            int ticks = getTicks(C);
+            if (!isWithinStrikingDistance(distSq) && !isAtWall(C)) {
+               resetTicks(C);
+            } else if (isCloseEnough) {
+               C.lookAt(plyr, 30.0F, 30.0F);
+               incTicks(C);
+               if (ticks > (Integer)ESMConfig.CreeperObstructedExplodeTicks.get()) {
+                  CreeperExplode.ignite(C);
                }
+            } else {
+               resetTicks(C);
             }
+
+            if (isHoveringAbove(C, plyr)) {
+               CreeperExplode.ignite(C);
+            }
+         } else {
+            resetTicks(C);
          }
       }
    }
@@ -60,47 +59,45 @@ public class CreeperBreachWalls {
       TICK_MAP.clear();
    }
 
-   void IncTicks(Creeper C) {
+   private static void incTicks(Creeper C) {
       synchronized (TICK_MAP) {
-         int CurrTicks = this.GetTicks(C);
-         this.SetTicks(C, ++CurrTicks);
+         int currTicks = getTicks(C);
+         setTicks(C, ++currTicks);
       }
    }
 
-   void SetTicks(Creeper C, int Amt) {
-      if (Amt <= 0) {
+   private static void setTicks(Creeper C, int amt) {
+      if (amt <= 0) {
          TICK_MAP.remove(C);
       } else {
-         TICK_MAP.put(C, Amt);
+         TICK_MAP.put(C, amt);
       }
    }
 
-   void ResetTicks(Creeper C) {
-      this.SetTicks(C, 0);
+   private static void resetTicks(Creeper C) {
+      setTicks(C, 0);
    }
 
-   int GetTicks(Creeper C) {
+   private static int getTicks(Creeper C) {
       return TICK_MAP.getOrDefault(C, 0);
    }
 
-   boolean isAtWall(Entity Entity_Class) {
-      GetBlockingBlock Blocking_Block = new GetBlockingBlock(Entity_Class);
-      return Blocking_Block.isFootBlocked && Blocking_Block.isBlocking;
+   private static boolean isAtWall(Entity entity) {
+      return GetBlockingBlock.isWallBlocked(entity);
    }
 
-   boolean isHoveringAbove(Creeper C, ServerPlayer Player_Target) {
-      BlockPos Creeper_Pos = C.blockPosition();
-      BlockPos Player_Pos = Player_Target.blockPosition();
-      float x_diff = Math.abs(Creeper_Pos.getX() - Player_Pos.getX());
-      float z_diff = Math.abs(Creeper_Pos.getZ() - Player_Pos.getZ());
-      return x_diff < ((Integer)ESMConfig.CreeperAboveExplodeDistance.get()).intValue()
-         && z_diff < ((Integer)ESMConfig.CreeperAboveExplodeDistance.get()).intValue()
-         && Creeper_Pos.getY() > Player_Pos.getY()
-         && (Creeper_Pos.getY() - Player_Pos.getY()) <= 10;
+   private static boolean isHoveringAbove(Creeper C, ServerPlayer playerTarget) {
+      BlockPos creeperPos = C.blockPosition();
+      BlockPos playerPos = playerTarget.blockPosition();
+      int xDiff = Math.abs(creeperPos.getX() - playerPos.getX());
+      int zDiff = Math.abs(creeperPos.getZ() - playerPos.getZ());
+      int aboveDist = (Integer)ESMConfig.CreeperAboveExplodeDistance.get();
+      int yDiff = creeperPos.getY() - playerPos.getY();
+      return xDiff < aboveDist && zDiff < aboveDist && yDiff > 0 && yDiff <= 10;
    }
 
-   boolean isWithinStrikingDistance(Creeper C, ServerPlayer Player_Target) {
-      float Creeper_Dist = C.distanceTo(Player_Target);
-      return Creeper_Dist < ((Integer)ESMConfig.CreeperStrikingDistance.get()).intValue();
+   private static boolean isWithinStrikingDistance(float distSq) {
+      int strikeDist = (Integer)ESMConfig.CreeperStrikingDistance.get();
+      return distSq < (float)(strikeDist * strikeDist);
    }
 }

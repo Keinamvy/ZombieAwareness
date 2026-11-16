@@ -17,105 +17,76 @@ import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 public class MobStartFires {
-   private static final Logger LOGGER = LogManager.getLogger();
-   String[] Excluded_Tags = new String[]{
-      "_sign",
-      "_bed",
-      "pressure_plate",
-      "_button",
-      "sugar_cane",
-      "juke",
-      "trapdoor",
-      "enchanting",
-      "brewing",
-      "potted_",
-      "skull",
-      "_head",
-      "chest",
-      "dropper",
-      "prismarine",
-      "book",
-      "grass",
-      "snow",
-      "flower",
-      "sapling",
-      "bush",
-      "stem",
-      "dragon",
-      "carrots",
-      "potatoes",
-      "carpet",
-      "banner",
-      "structure",
-      "compost",
-      "piston",
-      "log"
-   };
-
    public MobStartFires(Mob M) {
-      double New_RNG = new RNG().GetDouble(0.0, 100.0);
-      double Chance_Burn_Wood = (Double)ESMConfig.ChanceOfZombieLightFire.get();
-      if (New_RNG < Chance_Burn_Wood) {
-         this.StartFire(M);
-      }
+      tryStartFire(M);
    }
 
-   void StartFire(Mob M) {
+   public static void tryStartFire(Mob M) {
       if (M == null) {
          return;
       }
-      BlockPos Block_Pos = M.blockPosition();
+      if (RNG.getDouble(0.0, 100.0) >= (Double)ESMConfig.ChanceOfZombieLightFire.get()) {
+         return;
+      }
       LivingEntity Living_Entity = M.getTarget();
-      if (Living_Entity instanceof ServerPlayer Server_Player && MobInfo.isSameDimension(M, Server_Player)) {
-         Level Lvl = MobInfo.GetMobLevel(M);
-         if (Lvl == null || Lvl.isClientSide()) {
-            return;
-         }
-         boolean isDone = false;
+      if (!(Living_Entity instanceof ServerPlayer Server_Player) || !MobInfo.isSameDimension(M, Server_Player)) {
+         return;
+      }
+      Level Lvl = MobInfo.GetMobLevel(M);
+      if (Lvl == null || Lvl.isClientSide()) {
+         return;
+      }
 
-         for (int x = -1; x <= 1; x++) {
-            for (int y = -1; y <= 1; y++) {
-               for (int z = -1; z <= 1; z++) {
-                  if (!isDone) {
-                     BlockPos Curr_Block_Pos = Block_Pos.offset(x, y, z);
-                     if (!arePosAndNeighborsLoaded(Lvl, Curr_Block_Pos)) {
-                        continue;
-                     }
-                     BlockState CurrBlock_State = Lvl.getBlockState(Curr_Block_Pos);
-                     Block B = CurrBlock_State.getBlock();
-                     boolean canBurn = ((FireBlockAccessor)Blocks.FIRE).invokeCanBurn(CurrBlock_State) || BaseFireBlock.canBePlacedAt(Lvl, Curr_Block_Pos, Direction.NORTH);
-                     if (canBurn && this.isNotExcluded(B)) {
-                        this.LightFire(Server_Player, Lvl, Curr_Block_Pos, CurrBlock_State);
-                        isDone = true;
-                     }
-                  }
+      BlockPos center = M.blockPosition();
+      BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
+      BlockPos.MutableBlockPos neighborPos = new BlockPos.MutableBlockPos();
+
+      for (int x = -1; x <= 1; x++) {
+         for (int y = -1; y <= 1; y++) {
+            for (int z = -1; z <= 1; z++) {
+               mutablePos.set(center.getX() + x, center.getY() + y, center.getZ() + z);
+               if (!Lvl.isLoaded(mutablePos)) {
+                  continue;
+               }
+               BlockState currState = Lvl.getBlockState(mutablePos);
+               if (currState.isAir()) {
+                  continue;
+               }
+               Block B = currState.getBlock();
+               if (!isNotExcluded(B)) {
+                  continue;
+               }
+               if (!areNeighborsLoaded(Lvl, mutablePos, neighborPos)) {
+                  continue;
+               }
+               boolean canBurn = ((FireBlockAccessor)Blocks.FIRE).invokeCanBurn(currState)
+                     || BaseFireBlock.canBePlacedAt(Lvl, mutablePos, Direction.NORTH);
+               if (canBurn) {
+                  lightFire(Lvl, mutablePos.immutable());
+                  return;
                }
             }
          }
       }
    }
 
-   private static boolean arePosAndNeighborsLoaded(Level lvl, BlockPos pos) {
-      if (!MobInfo.isServerPosLoaded(lvl, pos)) {
-         return false;
-      }
+   private static boolean areNeighborsLoaded(Level lvl, BlockPos pos, BlockPos.MutableBlockPos scratch) {
       for (Direction dir : Direction.values()) {
-         if (!lvl.isLoaded(pos.relative(dir))) {
+         scratch.setWithOffset(pos, dir);
+         if (!lvl.isLoaded(scratch)) {
             return false;
          }
       }
       return true;
    }
 
-   boolean isNotExcluded(Block B) {
+   private static boolean isNotExcluded(Block B) {
       return ConfigHelper.ConfigHasValue(ESMConfig.FlammableBlocksWhitelist, B, true);
    }
 
-   void LightFire(ServerPlayer Curr_Tgt, Level Lvl, BlockPos Fire_Pos, BlockState Curr_Blockstate) {
+   private static void lightFire(Level Lvl, BlockPos Fire_Pos) {
       if (!MobInfo.isServerPosLoaded(Lvl, Fire_Pos)) {
          return;
       }

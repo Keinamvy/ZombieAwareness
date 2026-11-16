@@ -18,7 +18,10 @@ public abstract class MixinEntitySerialization {
     public void hook(ValueOutput data, CallbackInfo ci) {
         ZombieAwareness.unitTest("2");
         Mob ent = ((Mob)(Object)this);
-        data.store("za_data", CompoundTag.CODEC, ZombieAwareness.getPersistentDataSafe(ent));
+        CompoundTag tag = ZombieAwareness.getPersistentDataOrNull(ent);
+        if (tag != null && !tag.isEmpty()) {
+            data.store("za_data", CompoundTag.CODEC, tag);
+        }
     }
 
     @Inject(method = "readAdditionalSaveData",
@@ -26,6 +29,10 @@ public abstract class MixinEntitySerialization {
     public void hook2(ValueInput data, CallbackInfo ci) {
         ZombieAwareness.unitTest("3");
         Mob ent = ((Mob)(Object)this);
-        ZombieAwareness.setPersistentDataSafe(ent, data.read("za_data", CompoundTag.CODEC).orElseGet(CompoundTag::new));
+        data.read("za_data", CompoundTag.CODEC).ifPresent(tag -> {
+            if (!tag.isEmpty()) {
+                ZombieAwareness.setPersistentDataSafe(ent, tag);
+            }
+        });
     }
 }

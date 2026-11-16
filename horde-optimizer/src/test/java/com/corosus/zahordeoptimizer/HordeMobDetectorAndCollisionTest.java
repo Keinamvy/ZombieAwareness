@@ -92,6 +92,12 @@ public class HordeMobDetectorAndCollisionTest {
 
         // Even if collision is toggled off, preventCramming alone still filters horde mobs from cramming scan
         assertTrue(HordeCollisionPolicy.shouldExcludeFromPushScan(true, true, true, false, true, true));
+
+        // Fast pushEntities HEAD skip: skips AABB scan when hordeToHordeOnly=true and no player is within radius
+        assertTrue(HordeCollisionPolicy.shouldSkipPushEntitiesForSelf(true, true, true, true, true, false));
+        assertFalse(HordeCollisionPolicy.shouldSkipPushEntitiesForSelf(true, true, true, true, true, true));
+        assertFalse(HordeCollisionPolicy.shouldSkipPushEntitiesForSelf(false, true, true, true, true, false));
+        assertTrue(HordeCollisionPolicy.shouldSkipPushEntitiesForSelf(true, true, true, false, false, true));
     }
 
     @Test

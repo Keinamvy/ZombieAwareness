@@ -213,4 +213,16 @@ public class HordeSpecialUnitsAndRapidSpawnTest {
         assertNotNull(entityTypesClass.getField("ZOMBIE_HORSE"));
         assertNotNull(Class.forName("net.minecraft.world.entity.animal.equine.ZombieHorse", false, cl));
     }
+
+    @Test
+    void fortificationCacheDefaultsAndWardenStateTrackingWorkCleanly() {
+        ChunkHeatManager.ActiveHorde horde = new ChunkHeatManager.ActiveHorde(
+                new BlockPos(10, 64, 10), Collections.emptySet(), 6000, 12, 10);
+        assertEquals(-1L, horde.lastFortifiedCheckTick);
+        assertNull(horde.lastFortifiedCheckPos);
+        assertFalse(HordeSpecialUnitHelper.hasActiveWardenStates());
+        assertFalse(HordeSpecialUnitHelper.isTaczTurretEntity(null));
+        assertTrue(HordeSpecialUnitHelper.isTaczTurretEntityTypeId("tacz_turrets", "turret"),
+                "Turret ID helper remains functional regardless of FabricLoader mod-loaded short-circuit");
+    }
 }

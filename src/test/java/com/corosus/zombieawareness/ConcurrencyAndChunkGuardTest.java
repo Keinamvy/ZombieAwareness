@@ -42,39 +42,52 @@ public class ConcurrencyAndChunkGuardTest {
         assertInstanceOf(ConcurrentHashMap.class, ZombieAwareness.entityData);
         assertInstanceOf(ConcurrentHashMap.class, ZombieAwareness.unitTest);
 
-        // Null-safe fallback when ZombieAwareness.instance() is null
+        // Read-only lookups must never allocate or insert entries into entityData
+        assertNull(ZombieAwareness.getPersistentDataOrNull(null));
+        assertEquals(0L, ZombieAwareness.getLastActionTick(null));
+        assertTrue(ZombieAwareness.entityData.isEmpty());
         assertNotNull(ZombieAwareness.getPersistentDataSafe(null));
 
+        boolean prevUnitTestFlag = ZombieAwareness.debugUnitTestEnabled;
+        ZombieAwareness.debugUnitTestEnabled = false;
+        ZombieAwareness.unitTest("suppressed_when_disabled");
+        assertFalse(ZombieAwareness.unitTest.containsKey("suppressed_when_disabled"));
+
+        ZombieAwareness.debugUnitTestEnabled = true;
         int threads = 6;
         int entriesPerThread = 200;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
-        CountDownLatch startLatch = new CountDownLatch(1);
-        List<Future<?>> futures = new ArrayList<>();
+        try {
+            CountDownLatch startLatch = new CountDownLatch(1);
+            List<Future<?>> futures = new ArrayList<>();
 
-        for (int t = 0; t < threads; t++) {
-            final int workerId = t;
-            futures.add(pool.submit(() -> {
-                startLatch.await();
-                for (int i = 0; i < entriesPerThread; i++) {
-                    UUID id = UUID.randomUUID();
-                    CompoundTag tag = new CompoundTag();
-                    tag.putLong(ZAUtil.ZA_LAST_ACTION, workerId * 1000L + i);
-                    ZombieAwareness.entityData.put(id, tag);
-                    ZombieAwareness.unitTest("step_" + workerId + "_" + i);
-                    assertNotNull(ZombieAwareness.entityData.get(id));
-                    if (i % 2 == 0) {
-                        ZombieAwareness.removeEntityData(id);
+            for (int t = 0; t < threads; t++) {
+                final int workerId = t;
+                futures.add(pool.submit(() -> {
+                    startLatch.await();
+                    for (int i = 0; i < entriesPerThread; i++) {
+                        UUID id = UUID.randomUUID();
+                        CompoundTag tag = new CompoundTag();
+                        tag.putLong(ZAUtil.ZA_LAST_ACTION, workerId * 1000L + i);
+                        ZombieAwareness.entityData.put(id, tag);
+                        ZombieAwareness.unitTest("step_" + workerId + "_" + i);
+                        assertNotNull(ZombieAwareness.entityData.get(id));
+                        if (i % 2 == 0) {
+                            ZombieAwareness.removeEntityData(id);
+                        }
                     }
-                }
-                return null;
-            }));
-        }
+                    return null;
+                }));
+            }
 
-        startLatch.countDown();
-        for (Future<?> f : futures) {
-            f.get(10, TimeUnit.SECONDS);
+            startLatch.countDown();
+            for (Future<?> f : futures) {
+                f.get(10, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+            ZombieAwareness.debugUnitTestEnabled = prevUnitTestFlag;
         }
-        pool.shutdownNow();
 
         assertEquals(threads * (entriesPerThread / 2), ZombieAwareness.entityData.size());
         assertEquals(threads * entriesPerThread, ZombieAwareness.unitTest.size());
@@ -95,9 +108,17 @@ public class ConcurrencyAndChunkGuardTest {
         assertInstanceOf(CopyOnWriteArrayList.class, CoroConfigRegistry.instance().configs);
 
         ZAUtil.listSoundProfiles.clear();
+        ZAUtil.lookupSoundNameToProfileCache.clear();
         ZAUtil.listSoundProfiles.add(new SoundProfileEntry("test.sound", 1.0D));
         assertNotNull(ZAUtil.getSoundIDEntry("test.sound"));
+
+        // Misses are memoized via sentinel so repeated ambient sounds avoid O(N) list re-scans
+        assertNull(ZAUtil.getSoundIDEntry("minecraft:ambient.cave"));
+        assertTrue(ZAUtil.lookupSoundNameToProfileCache.containsKey("minecraft:ambient.cave"));
+        assertNull(ZAUtil.getSoundIDEntry("minecraft:ambient.cave"));
+
         ZAUtil.listSoundProfiles.clear();
+        ZAUtil.lookupSoundNameToProfileCache.clear();
     }
 
     @Test

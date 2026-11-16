@@ -98,19 +98,25 @@ public class NightmareWorldgenDeadlockTest {
    }
 
    @Test
-   @DisplayName("ConfigHelper guards empty/null lists and ESMConfig stores immutable list snapshots")
+   @DisplayName("ConfigHelper fast whitelist caching, epoch invalidation, and ESMConfig list immutability")
    void testConfigHelperEmptyListAndESMConfigImmutability() {
-      assertNull(ConfigHelper.GetRandomValueFromConfig(null));
-      assertNull(ConfigHelper.GetRandomEntityTypeFromConfig(null));
+      assertFalse(ConfigHelper.ConfigHasValue(null, "zombie", false));
+      assertFalse(ConfigHelper.ConfigHasValue(ESMConfig.DuplicatedMobs, (String) null, false));
       assertNull(ConfigHelper.GetEntityTypeFromName(null));
       assertNull(ConfigHelper.GetEntityTypeFromName("  "));
 
+      assertTrue(ConfigHelper.matchesPreNormalized("oak_planks", new String[]{"plank", "stair"}, true));
+      assertFalse(ConfigHelper.matchesPreNormalized("stone", new String[]{"plank", "stair"}, true));
+      assertTrue(ConfigHelper.matchesPreNormalized("zombie", new String[]{"zombie", "creeper"}, false));
+      assertFalse(ConfigHelper.matchesPreNormalized("zombie_villager", new String[]{"zombie", "creeper"}, false));
+
       List<? extends String> original = ESMConfig.DuplicatedMobs.get();
+      int epochBefore = ESMConfig.getConfigEpoch();
       try {
          List<String> mutable = new ArrayList<>();
          ESMConfig.DuplicatedMobs.set(mutable);
-         assertNull(ConfigHelper.GetRandomValueFromConfig(ESMConfig.DuplicatedMobs));
-         assertNull(ConfigHelper.GetRandomEntityTypeFromConfig(ESMConfig.DuplicatedMobs));
+         assertTrue(ESMConfig.getConfigEpoch() > epochBefore, "Updating config value must increment config epoch");
+         assertFalse(ConfigHelper.ConfigHasValue(ESMConfig.DuplicatedMobs, "zombie", false));
 
          mutable.add("zombie");
          assertTrue(
@@ -118,9 +124,40 @@ public class NightmareWorldgenDeadlockTest {
             "ESMConfig list must be stored as an immutable snapshot isolated from caller mutations"
          );
          assertThrows(UnsupportedOperationException.class, () -> ESMConfig.DuplicatedMobs.get().clear());
+
+         ESMConfig.DuplicatedMobs.set(List.of("creeper", "zombie_villager"));
+         assertTrue(ConfigHelper.ConfigHasValue(ESMConfig.DuplicatedMobs, "Zombie Villager", false));
+         assertFalse(ConfigHelper.ConfigHasValue(ESMConfig.DuplicatedMobs, "zombie", false));
       } finally {
          ESMConfig.DuplicatedMobs.set(original);
       }
+   }
+
+   @Test
+   @DisplayName("LivingMobTick and MobBreakLightSources stagger work evenly across ticks by entity ID")
+   void testStaggeredTickAndLightScanCadence() {
+      int[] activePerTick = new int[20];
+      for (int id = 0; id < 200; id++) {
+         int fireCount = 0;
+         for (long t = 0; t < 20; t++) {
+            if (nightmareesm.isStaggeredTick(t, id)) {
+               activePerTick[(int) t]++;
+               fireCount++;
+            }
+         }
+         assertEquals(1, fireCount, "Entity " + id + " must tick exactly once per 20-tick window");
+      }
+      for (int t = 0; t < 20; t++) {
+         assertEquals(10, activePerTick[t], "Tick " + t + " should receive an equal 1/20th share of mobs");
+      }
+
+      int lightScans = 0;
+      for (long t = 0; t < 80; t++) {
+         if (MobBreakLightSources.shouldScanLightThisTick(t, 42)) {
+            lightScans++;
+         }
+      }
+      assertEquals(1, lightScans, "Light source scan must run once per 80 ticks per mob");
    }
 
    @Test

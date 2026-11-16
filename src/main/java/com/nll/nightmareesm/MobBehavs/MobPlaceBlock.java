@@ -12,6 +12,16 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
 
+/**
+ * Isolated Zombie Build Ability — Safe Block Placement Helper.
+ *
+ * <p>Shared placement primitive used by {@link MobBuildBridge} and {@link MobBuildUp} to place a
+ * building block on the server only when the target position is loaded and does not overwrite
+ * unbreakable blocks, obsidian, or block entities.
+ *
+ * <p><b>Current Status:</b> Kept intact alongside {@link MobBuildBridge}, {@link MobBuildUp}, and
+ * {@link com.nll.nightmareesm.SnapToBlockCenter} for future re-enablement of the Zombie Build ability.
+ */
 public class MobPlaceBlock {
    public MobPlaceBlock(Entity Entity_Class, Block Block_Type, BlockPos Position) {
       if (Entity_Class instanceof Mob Mob_Entity && Position != null && Block_Type != null) {

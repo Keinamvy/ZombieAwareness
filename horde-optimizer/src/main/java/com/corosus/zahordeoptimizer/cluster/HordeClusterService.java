@@ -4,6 +4,8 @@ import com.corosus.zahordeoptimizer.HordeMobDetector;
 import com.corosus.zahordeoptimizer.config.HordeOptimizerConfig;
 import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.heat.ChunkHeatManager;
+import it.unimi.dsi.fastutil.ints.Int2LongMap;
+import it.unimi.dsi.fastutil.ints.Int2LongOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -29,13 +31,35 @@ public final class HordeClusterService {
 
     private static final Map<ServerLevel, LevelClusterRuntime> LEVEL_RUNTIMES = new ConcurrentHashMap<>();
     private static final Set<ServerLevel> UNLOADED_LEVELS = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
+    private static final ThreadLocal<SpatialClusterGrid.MobTickResult> TICK_RESULT_SCRATCH =
+            ThreadLocal.withInitial(SpatialClusterGrid.MobTickResult::new);
 
     private static final class LevelClusterRuntime {
         final SpatialClusterGrid grid = new SpatialClusterGrid();
-        final Map<Integer, Long> lastMobTick = new ConcurrentHashMap<>();
+        final Int2LongMap lastMobTick = new Int2LongOpenHashMap();
         volatile long lastPruneTick = -1L;
 
-        void clear() {
+        LevelClusterRuntime() {
+            lastMobTick.defaultReturnValue(Long.MIN_VALUE);
+        }
+
+        synchronized long putLastTick(int entityId, long gameTick) {
+            return lastMobTick.put(entityId, gameTick);
+        }
+
+        synchronized void removeMobTick(int entityId) {
+            lastMobTick.remove(entityId);
+        }
+
+        synchronized int lastMobTickSize() {
+            return lastMobTick.size();
+        }
+
+        synchronized void removeStaleTicks(long gameTime, long maxAge) {
+            lastMobTick.int2LongEntrySet().removeIf(e -> (gameTime - e.getLongValue()) > maxAge);
+        }
+
+        synchronized void clear() {
             grid.clear();
             lastMobTick.clear();
             lastPruneTick = -1L;
@@ -58,39 +82,63 @@ public final class HordeClusterService {
     }
 
     public static void onHordeMobTick(Mob mob) {
-        if (!isClusterOptimizationActive(mob)) {
+        if (mob == null || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
             return;
         }
-        ServerLevel level = (ServerLevel) mob.level();
+        if (!(mob.level() instanceof ServerLevel level)) {
+            return;
+        }
         long gameTick = level.getGameTime();
+        if (mob instanceof HordeMobTickCache cache && cache.zaho$getClusterStateTick() == gameTick) {
+            return;
+        }
+
+        boolean activeEligible = mob.isAlive()
+                && !mob.isRemoved()
+                && !mob.entityTags().contains(ZAUtil.BLOODMOON_WARDEN_TAG)
+                && !mob.entityTags().contains(ZAUtil.KNIGHT_MOUNT_TAG)
+                && !(mob.isPassenger() && mob.entityTags().contains(ZAUtil.KNIGHT_TAG))
+                && HordeMobDetector.isHordeMob(mob);
+
+        if (!activeEligible) {
+            if (mob instanceof HordeMobTickCache cache) {
+                cache.zaho$setClusterTickState(gameTick, false, false, false, false);
+            }
+            return;
+        }
+
         LevelClusterRuntime runtime = getOrCreateRuntime(level);
         if (runtime == null) {
             return;
         }
 
-        Long prevTick = runtime.lastMobTick.put(mob.getId(), gameTick);
-        if (prevTick != null && prevTick == gameTick) {
+        long prevTick = runtime.putLastTick(mob.getId(), gameTick);
+        if (prevTick == gameTick && !(mob instanceof HordeMobTickCache)) {
             return;
         }
 
-        ClusterRecord cluster = runtime.grid.updateMob(
+        SpatialClusterGrid.MobTickResult tickResult = TICK_RESULT_SCRATCH.get();
+        runtime.grid.updateMobAndEvaluate(
                 mob.getId(),
                 mob.getX(),
                 mob.getY(),
                 mob.getZ(),
                 gameTick,
                 HordeOptimizerConfig.clusterCellSizeXZ,
-                HordeOptimizerConfig.clusterCellSizeY
+                HordeOptimizerConfig.clusterCellSizeY,
+                HordeOptimizerConfig.minClusterSizeToOptimize,
+                HordeOptimizerConfig.maxThrottleInterval,
+                tickResult
         );
 
-        int leaderId = cluster.getLeaderId();
+        ClusterRecord cluster = tickResult.cluster;
         LivingEntity currentTarget = mob.getTarget();
         if (currentTarget != null && ZAUtil.isVillagerEntity(currentTarget)) {
             mob.setTarget(null);
             currentTarget = null;
         }
 
-        if (leaderId == mob.getId()) {
+        if (tickResult.isLeader) {
             if (!isValidClusterTarget(currentTarget) || !(currentTarget instanceof Player)) {
                 ServerPlayer hordePlayer = ChunkHeatManager.resolveHordeTargetPlayer(level, mob.getX(), mob.getY(), mob.getZ());
                 if (hordePlayer != null) {
@@ -112,8 +160,19 @@ public final class HordeClusterService {
                 }
                 cluster.cacheTarget(currentTarget.getUUID(), currentTarget.getX(), currentTarget.getY(), currentTarget.getZ(), gameTick);
             }
-        } else if (cluster.size() >= HordeOptimizerConfig.minClusterSizeToOptimize) {
+        } else if (tickResult.clusterSize >= HordeOptimizerConfig.minClusterSizeToOptimize) {
             syncFollowerTargetFromLeader(mob, level, cluster);
+        }
+
+        if (mob instanceof HordeMobTickCache cache) {
+            boolean throttleAll = !tickResult.isActiveTick;
+            cache.zaho$setClusterTickState(
+                    gameTick,
+                    true,
+                    throttleAll,
+                    tickResult.shouldSkipRecomputePath,
+                    throttleAll
+            );
         }
     }
 
@@ -173,10 +232,15 @@ public final class HordeClusterService {
     }
 
     private static boolean isClusterOptimizationActive(Mob mob) {
-        return mob != null
-                && HordeOptimizerConfig.enabled
-                && HordeOptimizerConfig.enableClusterOptimization
-                && mob.isAlive()
+        if (mob == null || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
+            return false;
+        }
+        if (mob instanceof HordeMobTickCache cache && mob.level() instanceof ServerLevel level) {
+            if (cache.zaho$getClusterStateTick() == level.getGameTime()) {
+                return cache.zaho$isClusterActiveCached();
+            }
+        }
+        return mob.isAlive()
                 && !mob.isRemoved()
                 && mob.level() instanceof ServerLevel
                 && !mob.entityTags().contains(ZAUtil.BLOODMOON_WARDEN_TAG)
@@ -195,10 +259,20 @@ public final class HordeClusterService {
     }
 
     public static boolean shouldThrottleGoalSelector(Mob mob) {
-        if (!isClusterOptimizationActive(mob) || mob.tickCount <= 2 || isCloseToTarget(mob)) {
+        if (mob == null || mob.tickCount <= 2 || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
             return false;
         }
-        ServerLevel level = (ServerLevel) mob.level();
+        if (!(mob.level() instanceof ServerLevel level)) {
+            return false;
+        }
+        if (mob instanceof HordeMobTickCache cache && cache.zaho$getClusterStateTick() == level.getGameTime()) {
+            return cache.zaho$isClusterActiveCached()
+                    && cache.zaho$shouldThrottleGoalAndSensingCached()
+                    && !isCloseToTarget(mob);
+        }
+        if (!isClusterOptimizationActive(mob) || isCloseToTarget(mob)) {
+            return false;
+        }
         LevelClusterRuntime runtime = LEVEL_RUNTIMES.get(level);
         if (runtime == null) {
             return false;
@@ -216,10 +290,20 @@ public final class HordeClusterService {
     }
 
     public static boolean shouldSkipRecomputePath(Mob mob) {
+        if (mob == null || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
+            return false;
+        }
+        if (!(mob.level() instanceof ServerLevel level)) {
+            return false;
+        }
+        if (mob instanceof HordeMobTickCache cache && cache.zaho$getClusterStateTick() == level.getGameTime()) {
+            return cache.zaho$isClusterActiveCached()
+                    && cache.zaho$shouldSkipRecomputePathCached()
+                    && !isCloseToTarget(mob);
+        }
         if (!isClusterOptimizationActive(mob) || isCloseToTarget(mob)) {
             return false;
         }
-        ServerLevel level = (ServerLevel) mob.level();
         LevelClusterRuntime runtime = LEVEL_RUNTIMES.get(level);
         if (runtime == null) {
             return false;
@@ -237,6 +321,20 @@ public final class HordeClusterService {
     }
 
     public static boolean shouldThrottleZombieAwarenessAI(Mob mob) {
+        if (mob == null || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
+            return false;
+        }
+        if (!(mob.level() instanceof ServerLevel level)) {
+            return false;
+        }
+        if (mob instanceof HordeMobTickCache cache) {
+            if (cache.zaho$getClusterStateTick() != level.getGameTime()) {
+                onHordeMobTick(mob);
+            }
+            return cache.zaho$isClusterActiveCached()
+                    && cache.zaho$shouldThrottleZaAiCached()
+                    && !isCloseToTarget(mob);
+        }
         if (!isClusterOptimizationActive(mob)) {
             return false;
         }
@@ -244,7 +342,6 @@ public final class HordeClusterService {
         if (isCloseToTarget(mob)) {
             return false;
         }
-        ServerLevel level = (ServerLevel) mob.level();
         LevelClusterRuntime runtime = LEVEL_RUNTIMES.get(level);
         if (runtime == null) {
             return false;
@@ -282,20 +379,13 @@ public final class HordeClusterService {
             return null;
         }
 
-        long gameTime = level.getGameTime();
-        Path cachedCopy = cluster.getCachedPathCopyIfFresh(
-                gameTime,
+        return cluster.adaptCachedPathIfFresh(
+                level.getGameTime(),
                 HordeOptimizerConfig.pathCacheTtlTicks,
                 reqX,
                 reqY,
                 reqZ,
-                HordeOptimizerConfig.pathCacheTargetTolerance);
-        if (cachedCopy == null) {
-            return null;
-        }
-
-        return ClusterRecord.adaptPathForFollower(
-                cachedCopy,
+                HordeOptimizerConfig.pathCacheTargetTolerance,
                 mob.getX(),
                 mob.getY(),
                 mob.getZ(),
@@ -356,7 +446,7 @@ public final class HordeClusterService {
         LevelClusterRuntime runtime = LEVEL_RUNTIMES.get(level);
         if (runtime != null) {
             runtime.grid.removeMob(entity.getId());
-            runtime.lastMobTick.remove(entity.getId());
+            runtime.removeMobTick(entity.getId());
         }
     }
 
@@ -378,11 +468,10 @@ public final class HordeClusterService {
             return e != null && e.isAlive() && !e.isRemoved() && HordeMobDetector.isHordeMob(e);
         });
         for (int id : removedIds) {
-            runtime.lastMobTick.remove(id);
+            runtime.removeMobTick(id);
         }
-        if (runtime.lastMobTick.size() > 4096) {
-            long maxAge = HordeOptimizerConfig.staleMemberTimeoutTicks;
-            runtime.lastMobTick.entrySet().removeIf(e -> (gameTime - e.getValue()) > maxAge);
+        if (runtime.lastMobTickSize() > 4096) {
+            runtime.removeStaleTicks(gameTime, HordeOptimizerConfig.staleMemberTimeoutTicks);
         }
     }
 

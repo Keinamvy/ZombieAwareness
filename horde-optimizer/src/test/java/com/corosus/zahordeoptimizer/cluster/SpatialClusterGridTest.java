@@ -274,4 +274,41 @@ public class SpatialClusterGridTest {
             pool.shutdownNow();
         }
     }
+
+    @Test
+    void singleLockTickEvalAndZeroAllocContainsMemberAndSingleCopyPathAdapt() {
+        SpatialClusterGrid grid = new SpatialClusterGrid();
+        SpatialClusterGrid.MobTickResult out = new SpatialClusterGrid.MobTickResult();
+
+        grid.updateMobAndEvaluate(1, 2.0, 64.0, 2.0, 100L, 6, 8, 2, 8, out);
+        assertTrue(out.isLeader);
+        assertEquals(1, out.clusterSize);
+        assertTrue(out.isActiveTick);
+        assertFalse(out.shouldSkipRecomputePath);
+        assertTrue(out.cluster.containsMember(1));
+        assertFalse(out.cluster.containsMember(999));
+
+        grid.updateMobAndEvaluate(2, 2.5, 64.0, 2.5, 100L, 6, 8, 2, 8, out);
+        assertFalse(out.isLeader);
+        assertEquals(2, out.clusterSize);
+        assertTrue(out.cluster.containsMember(2));
+
+        // Same-cell move reuses existing cell & updates coordinates in place
+        grid.updateMobAndEvaluate(2, 3.0, 64.0, 3.0, 101L, 6, 8, 2, 8, out);
+        assertEquals(101L, grid.getMobLocation(2).lastSeenTick());
+
+        // Single-copy path adaptation
+        List<Node> nodes = List.of(new Node(0, 64, 0), new Node(6, 64, 0), new Node(12, 64, 0));
+        Path leaderPath = new Path(nodes, new BlockPos(12, 64, 0), true);
+        out.cluster.cachePath(leaderPath, 12.5, 64.0, 0.5, 100L);
+
+        // Fresh & within snap tolerance -> adapts in place onto closest node (#1)
+        Path adapted = out.cluster.adaptCachedPathIfFresh(105L, 20, 12.5, 64.0, 0.5, 4.0, 6.2, 64.0, 0.2, 8.0);
+        assertNotNull(adapted);
+        assertEquals(1, adapted.getNextNodeIndex());
+
+        // Expired or out-of-range -> returns null without allocating Path copy
+        assertNull(out.cluster.adaptCachedPathIfFresh(150L, 20, 12.5, 64.0, 0.5, 4.0, 6.2, 64.0, 0.2, 8.0));
+        assertNull(out.cluster.adaptCachedPathIfFresh(105L, 20, 12.5, 64.0, 0.5, 4.0, 100.0, 64.0, 100.0, 8.0));
+    }
 }

@@ -47,8 +47,12 @@ public class ZDayPlayerLedger {
         return new ZDayPlayerLedger();
     }
 
-    public synchronized void save(Path file) {
-        if (file == null) {
+    public synchronized String toJsonSnapshot() {
+        return GSON.toJson(this);
+    }
+
+    public static void writeSnapshot(Path file, String jsonSnapshot) {
+        if (file == null || jsonSnapshot == null) {
             return;
         }
         try {
@@ -56,11 +60,18 @@ public class ZDayPlayerLedger {
                 Files.createDirectories(file.getParent());
             }
             try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-                GSON.toJson(this, writer);
+                writer.write(jsonSnapshot);
             }
         } catch (Exception e) {
             System.err.println("[ZombieAwareness] Failed to save ZDayPlayerLedger to " + file + ": " + e.getMessage());
         }
+    }
+
+    public synchronized void save(Path file) {
+        if (file == null) {
+            return;
+        }
+        writeSnapshot(file, toJsonSnapshot());
     }
 
     public synchronized List<ZDayStage> getCatchUpStagesAndMarkSeen(UUID playerUuid, int currentWorldDay, int currentStageNum) {

@@ -24,7 +24,7 @@ public abstract class MixinPreventWandering {
         if (mob == null || mob.level() == null || mob.level().isClientSide()) {
             return;
         }
-        long lastActionTime = ZombieAwareness.getPersistentDataSafe(mob).getLongOr(ZAUtil.ZA_LAST_ACTION, 0L);
+        long lastActionTime = ZombieAwareness.getLastActionTick(mob);
         if (lastActionTime > 0 && mob.level().getGameTime() - ZAConfigGeneral.tickCooldownBetweenPathfinds < lastActionTime) {
             cir.setReturnValue(false);
         }

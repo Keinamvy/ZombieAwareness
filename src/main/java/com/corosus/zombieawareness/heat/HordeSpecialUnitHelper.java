@@ -4,6 +4,7 @@ import com.corosus.coroutil.util.CoroUtilAttributes;
 import com.corosus.coroutil.util.CoroUtilPath;
 import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.ZombieAwareness;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -18,6 +19,7 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityAttachment;
 import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -41,9 +43,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 
 /**
@@ -137,8 +139,27 @@ public final class HordeSpecialUnitHelper {
 
     private static final Map<UUID, WardenSonicState> WARDEN_SONIC_STATES = new ConcurrentHashMap<>();
     private static final Map<Class<?>, TurretMethodHandles> TURRET_METHOD_CACHE = new ConcurrentHashMap<>();
+    private static final Map<EntityType<?>, Boolean> TURRET_TYPE_CACHE = new ConcurrentHashMap<>();
+    private static final boolean TACZ_TURRETS_LOADED = detectTaczTurretsLoaded();
 
     private HordeSpecialUnitHelper() {
+    }
+
+    private static boolean detectTaczTurretsLoaded() {
+        try {
+            return FabricLoader.getInstance().isModLoaded(TACZ_TURRETS_NAMESPACE);
+        } catch (Throwable ignored) {
+            // Plain JUnit test environment without FabricLoader bootstrap
+            return true;
+        }
+    }
+
+    public static boolean isTaczTurretsLoaded() {
+        return TACZ_TURRETS_LOADED;
+    }
+
+    public static boolean hasActiveWardenStates() {
+        return !WARDEN_SONIC_STATES.isEmpty();
     }
 
     public static void clearAllState() {
@@ -302,11 +323,13 @@ public final class HordeSpecialUnitHelper {
     }
 
     public static boolean isTaczTurretEntity(Entity entity) {
-        if (entity == null || entity.getType() == null) {
+        if (!TACZ_TURRETS_LOADED || entity == null || entity.getType() == null) {
             return false;
         }
-        Identifier key = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
-        return key != null && isTaczTurretEntityTypeId(key.getNamespace(), key.getPath());
+        return TURRET_TYPE_CACHE.computeIfAbsent(entity.getType(), type -> {
+            Identifier key = BuiltInRegistries.ENTITY_TYPE.getKey(type);
+            return key != null && isTaczTurretEntityTypeId(key.getNamespace(), key.getPath());
+        });
     }
 
     private static TurretMethodHandles getHandles(Mob turret) {
@@ -543,18 +566,16 @@ public final class HordeSpecialUnitHelper {
      * Keeps ZombieHorse cavalry moving steadily toward the mounted Knight's active target.
      */
     public static void steerKnightMountToRiderTarget(Mob mount) {
-        if (mount == null || !mount.isAlive() || mount.getPassengers().isEmpty()) {
+        if (mount == null || !mount.isAlive() || (mount.tickCount % 10 != 0 && !mount.getNavigation().isDone()) || mount.getPassengers().isEmpty()) {
             return;
         }
         for (Entity passenger : mount.getPassengers()) {
             if (passenger instanceof Mob rider && rider.isAlive() && isKnightZombie(rider)) {
                 LivingEntity target = rider.getTarget();
                 if (target != null && target.isAlive() && mount.distanceToSqr(target) > 6.25D) {
-                    if (mount.getNavigation().isDone() || mount.tickCount % 10 == 0) {
-                        try {
-                            CoroUtilPath.tryMoveToEntityLivingLongDist(mount, target, 1.25D);
-                        } catch (Throwable ignored) {
-                        }
+                    try {
+                        CoroUtilPath.tryMoveToEntityLivingLongDist(mount, target, 1.25D);
+                    } catch (Throwable ignored) {
                     }
                 }
                 break;
@@ -603,7 +624,7 @@ public final class HordeSpecialUnitHelper {
         if (level == null || center == null) {
             return 0;
         }
-        Random rand = new Random();
+        ThreadLocalRandom rand = ThreadLocalRandom.current();
         int spawned = 0;
 
         for (int i = 0; i < BLOODMOON_WARDEN_COUNT; i++) {
@@ -803,36 +824,40 @@ public final class HordeSpecialUnitHelper {
             return;
         }
 
-        // Prevent horde Wardens from burrowing underground and despawning mid-siege
-        try {
-            WardenAi.setDigCooldown(warden);
-        } catch (Throwable ignored) {
-        }
+        boolean periodicCheck = (warden.tickCount % 5 == 0);
 
-        // Scrub any accidental anger/target pointing at horde or hostile mobs
-        try {
-            if (shouldBlockWardenTargeting(warden, warden.getTarget())) {
-                warden.setTarget(null);
+        // Prevent horde Wardens from burrowing underground and despawning mid-siege
+        if (periodicCheck) {
+            try {
+                WardenAi.setDigCooldown(warden);
+            } catch (Throwable ignored) {
             }
-            Brain<?> b = warden.getBrain();
-            b.getMemory(MemoryModuleType.ATTACK_TARGET).ifPresent(memTarget -> {
-                if (shouldBlockWardenTargeting(warden, memTarget)) {
-                    b.eraseMemory(MemoryModuleType.ATTACK_TARGET);
+
+            // Scrub any accidental anger/target pointing at horde or hostile mobs
+            try {
+                if (shouldBlockWardenTargeting(warden, warden.getTarget())) {
+                    warden.setTarget(null);
                 }
-            });
-            b.getMemory(MemoryModuleType.ROAR_TARGET).ifPresent(roarTarget -> {
-                if (shouldBlockWardenTargeting(warden, roarTarget)) {
-                    b.eraseMemory(MemoryModuleType.ROAR_TARGET);
-                }
-            });
-            if (warden instanceof Warden w) {
-                w.getEntityAngryAt().ifPresent(angryAt -> {
-                    if (shouldBlockWardenTargeting(w, angryAt)) {
-                        w.clearAnger(angryAt);
+                Brain<?> b = warden.getBrain();
+                b.getMemory(MemoryModuleType.ATTACK_TARGET).ifPresent(memTarget -> {
+                    if (shouldBlockWardenTargeting(warden, memTarget)) {
+                        b.eraseMemory(MemoryModuleType.ATTACK_TARGET);
                     }
                 });
+                b.getMemory(MemoryModuleType.ROAR_TARGET).ifPresent(roarTarget -> {
+                    if (shouldBlockWardenTargeting(warden, roarTarget)) {
+                        b.eraseMemory(MemoryModuleType.ROAR_TARGET);
+                    }
+                });
+                if (warden instanceof Warden w) {
+                    w.getEntityAngryAt().ifPresent(angryAt -> {
+                        if (shouldBlockWardenTargeting(w, angryAt)) {
+                            w.clearAnger(angryAt);
+                        }
+                    });
+                }
+            } catch (Throwable ignored) {
             }
-        } catch (Throwable ignored) {
         }
 
         LivingEntity chosenTarget = selectBloodmoonWardenTarget(warden, turrets, fallbackPlayer, WARDEN_TURRET_SCAN_RADIUS);
@@ -870,9 +895,11 @@ public final class HordeSpecialUnitHelper {
         }
 
         // Suppress vanilla close-range SonicBoom while our long-range turret driver is in control
-        try {
-            SonicBoom.setCooldown(warden, 80);
-        } catch (Throwable ignored) {
+        if (targetChanged || periodicCheck) {
+            try {
+                SonicBoom.setCooldown(warden, 80);
+            } catch (Throwable ignored) {
+            }
         }
 
         double distSq = warden.distanceToSqr(chosenTarget);

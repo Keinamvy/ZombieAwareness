@@ -42,9 +42,10 @@ public abstract class ZombieAwareness
     public static final Map<UUID, CompoundTag> entityData = new ConcurrentHashMap<>();
 
     public static final Map<String, Boolean> unitTest = new ConcurrentHashMap<>();
+    public static volatile boolean debugUnitTestEnabled = Boolean.getBoolean("za.unitTest");
 
     public static void unitTest(String num) {
-        if (num != null) {
+        if (debugUnitTestEnabled && num != null) {
             unitTest.put(num, true);
         }
     }
@@ -74,6 +75,15 @@ public abstract class ZombieAwareness
         return entityData.computeIfAbsent(ent.getUUID(), k -> new CompoundTag());
     }
 
+    public static CompoundTag getPersistentDataOrNull(Entity ent) {
+        return ent != null ? entityData.get(ent.getUUID()) : null;
+    }
+
+    public static long getLastActionTick(Entity ent) {
+        CompoundTag tag = getPersistentDataOrNull(ent);
+        return tag != null ? tag.getLongOr(ZAUtil.ZA_LAST_ACTION, 0L) : 0L;
+    }
+
     public static void setPersistentDataSafe(Entity ent, CompoundTag compoundTag) {
         ZombieAwareness inst = instance;
         if (inst != null) {
@@ -86,11 +96,13 @@ public abstract class ZombieAwareness
     public static void removeEntityData(UUID entityUuid) {
         if (entityUuid != null) {
             entityData.remove(entityUuid);
+            ZAUtil.removePlayerTracking(entityUuid);
         }
     }
 
     public static void clearEntityData() {
         entityData.clear();
+        ZAUtil.clearPlayerTracking();
     }
 
     public ZombieAwareness() {
@@ -139,13 +151,15 @@ public abstract class ZombieAwareness
      * @return
      */
     public static boolean canProcessEntity(EntityType ent, boolean pregen) {
-
-        String entName = getEntityRegisteredName(ent);
-        if (ZAUtil.lookupTickableEntitiesCache.containsKey(ent))
-        {
-            return ZAUtil.lookupTickableEntitiesCache.get(ent);
+        if (ent == null) {
+            return false;
+        }
+        Boolean cached = ZAUtil.lookupTickableEntitiesCache.get(ent);
+        if (cached != null) {
+            return cached;
         }
 
+        String entName = getEntityRegisteredName(ent);
         boolean result = false;
         if (canConfigEntity(ent)) {
             boolean canProcess = getDefaultForEntity(ent);

@@ -1,5 +1,6 @@
 package com.corosus.zombieawareness.zday;
 
+import com.corosus.zombieawareness.config.ZAConfigZDay;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -9,14 +10,25 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ZDayProgressionManager {
+
+    private record StageCache(int worldDay, int forcedDay, int configSignature, ZDayStage stage) {}
+
+    private static final ExecutorService LEDGER_IO_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "ZA-ZDay-Ledger-IO");
+        t.setDaemon(true);
+        return t;
+    });
 
     private static volatile ZDayPlayerLedger ledger = new ZDayPlayerLedger();
     private static volatile Path ledgerPath = null;
     private static volatile long prevVanillaDayTime = -1L;
     private static volatile int forcedWorldDay = -1;
     private static volatile MinecraftServer currentServer = null;
+    private static volatile StageCache cachedStage = null;
 
     public static long advanceTickLogic(long currentActiveTicks, long prevVanillaDayTime, long currentVanillaDayTime, int onlinePlayerCount) {
         if (onlinePlayerCount <= 0) {
@@ -39,6 +51,7 @@ public class ZDayProgressionManager {
                 ledgerPath = dataDir.resolve("zombieawareness_zday_ledger.json");
                 ledger = ZDayPlayerLedger.load(ledgerPath);
                 forcedWorldDay = ledger.forcedWorldDay;
+                cachedStage = null;
                 if (server.overworld() != null) {
                     prevVanillaDayTime = server.overworld().getDefaultClockTime();
                 }
@@ -92,7 +105,7 @@ public class ZDayProgressionManager {
             }
             saveLedger();
         } else if (server.getTickCount() % 600 == 0) {
-            saveLedger();
+            saveLedgerAsync();
         }
     }
 
@@ -104,6 +117,19 @@ public class ZDayProgressionManager {
                 currentLedger.forcedWorldDay = forcedWorldDay;
                 currentLedger.save(path);
             }
+        }
+    }
+
+    public static void saveLedgerAsync() {
+        ZDayPlayerLedger currentLedger = ledger;
+        Path path = ledgerPath;
+        if (currentLedger != null && path != null) {
+            String snapshot;
+            synchronized (currentLedger) {
+                currentLedger.forcedWorldDay = forcedWorldDay;
+                snapshot = currentLedger.toJsonSnapshot();
+            }
+            LEDGER_IO_EXECUTOR.execute(() -> ZDayPlayerLedger.writeSnapshot(path, snapshot));
         }
     }
 
@@ -124,8 +150,30 @@ public class ZDayProgressionManager {
         return currentLedger != null ? currentLedger.activePlayTicks : 0L;
     }
 
+    private static int computeStageConfigSignature() {
+        int h = ZAConfigZDay.dayStage2TaCZ;
+        h = 31 * h + ZAConfigZDay.dayStage3Blackout;
+        h = 31 * h + ZAConfigZDay.dayStage4Bloodmoon;
+        h = 31 * h + ZAConfigZDay.dayStage5Breachers;
+        h = 31 * h + ZAConfigZDay.dayStage6WebsAndSprinters;
+        h = 31 * h + ZAConfigZDay.dayStage7Screamers;
+        h = 31 * h + ZAConfigZDay.dayStage8Engineers;
+        h = 31 * h + ZAConfigZDay.dayStage9Juggernauts;
+        h = 31 * h + ZAConfigZDay.dayStage10Collapse;
+        return h;
+    }
+
     public static ZDayStage getCurrentStage() {
-        return ZDayStage.getStageForDay(getActiveWorldDay());
+        int forced = forcedWorldDay;
+        int worldDay = getActiveWorldDay();
+        int sig = computeStageConfigSignature();
+        StageCache cache = cachedStage;
+        if (cache != null && cache.worldDay() == worldDay && cache.forcedDay() == forced && cache.configSignature() == sig) {
+            return cache.stage();
+        }
+        ZDayStage resolved = ZDayStage.getStageForDay(worldDay);
+        cachedStage = new StageCache(worldDay, forced, sig, resolved);
+        return resolved;
     }
 
     public static boolean isStageUnlocked(int stageNumber) {
@@ -134,6 +182,7 @@ public class ZDayProgressionManager {
 
     public static void setForcedWorldDay(int day) {
         forcedWorldDay = day;
+        cachedStage = null;
         ZDayPlayerLedger currentLedger = ledger;
         if (currentLedger != null) {
             synchronized (currentLedger) {
@@ -198,6 +247,7 @@ public class ZDayProgressionManager {
         prevVanillaDayTime = -1L;
         forcedWorldDay = -1;
         currentServer = null;
+        cachedStage = null;
     }
 
     public static ZDayPlayerLedger getLedger() {

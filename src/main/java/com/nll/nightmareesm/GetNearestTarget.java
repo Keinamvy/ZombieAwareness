@@ -1,118 +1,81 @@
 package com.nll.nightmareesm;
 
 import com.corosus.zombieawareness.ZAUtil;
-import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
-import net.minecraft.world.entity.ai.targeting.TargetingConditions;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.level.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 public class GetNearestTarget {
-   private static final Logger LOGGER = LogManager.getLogger();
-
    public Entity Get(Entity Attacker) {
-      MinecraftServer Curr_Server = Attacker != null && Attacker.level().getServer() != null ? Attacker.level().getServer() : nightmareesm.getCurrentServer();
+      return getNearest(Attacker);
+   }
+
+   public static Entity getNearest(Entity Attacker) {
+      if (Attacker == null) {
+         return null;
+      }
+      MinecraftServer Curr_Server = Attacker.level().getServer() != null ? Attacker.level().getServer() : nightmareesm.getCurrentServer();
       if (Curr_Server == null) {
          return null;
       }
       PlayerList Player_List = Curr_Server.getPlayerList();
-      int PlayerCount = Player_List.getPlayerCount();
-      return PlayerCount > 0 ? this.GetNearestEntity(Player_List, Attacker) : null;
-   }
-
-   Entity GetNearestEntity(PlayerList Player_List, Entity Attacker) {
-      List<Entity> Nearby_Entities = this.GetNearbyEntities(Player_List, Attacker);
-      int Entity_Count = Nearby_Entities.size();
-      if (Entity_Count > 0) {
-         float Winning_Distance = 999999.0F;
-         Entity Winning_Target = Nearby_Entities.getFirst();
-         if (!this.isEntitySurvivalModeOrMob(Winning_Target)) {
-            Winning_Target = null;
-            for (Entity entity : Nearby_Entities) {
-               if (this.isEntitySurvivalModeOrMob(entity)) {
-                  Winning_Target = entity;
-                  break;
-               }
-            }
-         }
-         if (Winning_Target == null) {
-            return null;
-         }
-         Winning_Distance = Attacker.distanceTo(Winning_Target);
-
-         for (int i = 0; i < Entity_Count; i++) {
-            Entity PotentialTgt = Nearby_Entities.get(i);
-            if (Winning_Target != PotentialTgt && this.isEntitySurvivalModeOrMob(PotentialTgt)) {
-               float Dist = Attacker.distanceTo(PotentialTgt);
-               if (Dist < Winning_Distance) {
-                  Winning_Distance = Dist;
-                  Winning_Target = PotentialTgt;
-               }
-            }
-         }
-
-         return Winning_Target;
-      } else {
+      if (Player_List.getPlayerCount() <= 0) {
          return null;
       }
-   }
 
-   List<Entity> GetNearbyEntities(PlayerList Player_List, Entity Attacker) {
-      List<Entity> Compiled_Entities = new ArrayList<>();
-      if (Attacker == null) {
-         return Compiled_Entities;
-      }
-      List<ServerPlayer> All_Players = Player_List.getPlayers();
-      int AllPlayerCount = All_Players.size();
-      int AlivePlayerCount = 0;
+      List<ServerPlayer> allPlayers = Player_List.getPlayers();
+      ServerPlayer bestPlayer = null;
+      double bestDistSq = Double.MAX_VALUE;
+      int alivePlayerCount = 0;
 
-      for (int i = 0; i < AllPlayerCount; i++) {
-         ServerPlayer Plyr = All_Players.get(i);
-         if (MobInfo.isSameDimension(Plyr, Attacker)
-            && isValidSurvivalPlayerTarget(Plyr.isCreative(), Plyr.isSpectator())
-            && Plyr.isAlive()) {
-            Compiled_Entities.add(Plyr);
-            AlivePlayerCount++;
-         }
-      }
-
-      if (AlivePlayerCount == 0 && (Boolean)ESMConfig.isMonstersTargetVillagers.get() && !ZAUtil.isHordeMob(Attacker) && Attacker instanceof Mob Mob_Attacker) {
-         double Attacker_Y = Attacker.getY();
-         double AttackDist = ((Integer)ESMConfig.MonsterAttackDistanceAboveGround.get()).intValue();
-         if (Attacker_Y < 50.0) {
-            AttackDist = ((Integer)ESMConfig.MonsterAttackDistanceUnderground.get()).intValue();
-         }
-
-         TargetingConditions Tgt = TargetingConditions.forCombat().range(AttackDist);
-         Level Lvl = MobInfo.GetMobLevel(Mob_Attacker);
-         if (Lvl != null && !Lvl.isClientSide()) {
-            List<Villager> All_Nearby_Entities = Lvl.getEntitiesOfClass(Villager.class, Attacker.getBoundingBox().inflate(AttackDist, AttackDist, AttackDist));
-
-            for (int i = 0; i < All_Nearby_Entities.size(); i++) {
-               Villager Curr_Villager = All_Nearby_Entities.get(i);
-               Entity Entity_Villager = Curr_Villager;
-               Compiled_Entities.add(Entity_Villager);
+      for (int i = 0; i < allPlayers.size(); i++) {
+         ServerPlayer plyr = allPlayers.get(i);
+         if (MobInfo.isSameDimension(plyr, Attacker)
+               && isValidSurvivalPlayerTarget(plyr.isCreative(), plyr.isSpectator())
+               && plyr.isAlive()) {
+            alivePlayerCount++;
+            double distSq = Attacker.distanceToSqr(plyr);
+            if (distSq < bestDistSq) {
+               bestDistSq = distSq;
+               bestPlayer = plyr;
             }
          }
       }
 
-      return Compiled_Entities;
+      if (bestPlayer != null) {
+         return bestPlayer;
+      }
+
+      if (alivePlayerCount == 0 && (Boolean)ESMConfig.isMonstersTargetVillagers.get() && !ZAUtil.isHordeMob(Attacker) && Attacker instanceof Mob mobAttacker) {
+         double attackDist = Attacker.getY() < 50.0
+            ? ((Integer)ESMConfig.MonsterAttackDistanceUnderground.get()).intValue()
+            : ((Integer)ESMConfig.MonsterAttackDistanceAboveGround.get()).intValue();
+         Level lvl = MobInfo.GetMobLevel(mobAttacker);
+         if (lvl != null && !lvl.isClientSide()) {
+            List<Villager> villagers = lvl.getEntitiesOfClass(Villager.class, Attacker.getBoundingBox().inflate(attackDist, attackDist, attackDist));
+            Villager bestVillager = null;
+            double bestVillagerDistSq = Double.MAX_VALUE;
+            for (int i = 0; i < villagers.size(); i++) {
+               Villager v = villagers.get(i);
+               double dSq = Attacker.distanceToSqr(v);
+               if (dSq < bestVillagerDistSq) {
+                  bestVillagerDistSq = dSq;
+                  bestVillager = v;
+               }
+            }
+            return bestVillager;
+         }
+      }
+
+      return null;
    }
 
    public static boolean isValidSurvivalPlayerTarget(boolean isCreative, boolean isSpectator) {
       return !isCreative && !isSpectator;
-   }
-
-   boolean isEntitySurvivalModeOrMob(Entity Entity_Class) {
-      return Entity_Class instanceof ServerPlayer Server_Player
-            ? isValidSurvivalPlayerTarget(Server_Player.isCreative(), Server_Player.isSpectator())
-            : true;
    }
 }

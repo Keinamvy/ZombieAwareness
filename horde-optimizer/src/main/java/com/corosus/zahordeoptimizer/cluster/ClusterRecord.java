@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.IntConsumer;
 
 /**
  * Represents one spatial cluster of horde mobs sharing a leader, target cache, and path/waypoint cache.
@@ -51,6 +52,19 @@ public final class ClusterRecord {
             invalidatePathCache();
         }
         return removed;
+    }
+
+    public synchronized boolean containsMember(int entityId) {
+        return memberIds.contains(entityId);
+    }
+
+    public synchronized void forEachMember(IntConsumer action) {
+        if (action == null || memberIds.isEmpty()) {
+            return;
+        }
+        for (int id : memberIds) {
+            action.accept(id);
+        }
     }
 
     public synchronized Set<Integer> getMemberIds() {
@@ -148,6 +162,27 @@ public final class ClusterRecord {
             return null;
         }
         return cachedPath != null ? cachedPath.copy() : null;
+    }
+
+    /**
+     * Checks path freshness and snaps the closest node to the follower BEFORE copying {@code cachedPath},
+     * guaranteeing at most one {@link Path#copy()} allocation.
+     */
+    public synchronized Path adaptCachedPathIfFresh(
+            long gameTick,
+            int ttlTicks,
+            double reqX,
+            double reqY,
+            double reqZ,
+            double targetTolerance,
+            double followerX,
+            double followerY,
+            double followerZ,
+            double maxSnapDistance) {
+        if (!isPathCacheFresh(gameTick, ttlTicks, reqX, reqY, reqZ, targetTolerance)) {
+            return null;
+        }
+        return adaptPathForFollower(cachedPath, followerX, followerY, followerZ, maxSnapDistance);
     }
 
     public synchronized Path getCachedPath() {

@@ -1,44 +1,49 @@
 package com.nll.nightmareesm.MobBehavs;
 
+import com.nll.nightmareesm.BlockInfo;
 import com.nll.nightmareesm.GetBlockingBlock;
+import com.nll.nightmareesm.MobInfo;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 
 public class MobDig {
-   float DigDist = 2.0F;
-
    public MobDig(Entity Entity_Class) {
-      if (!(Entity_Class instanceof Monster M)) {
-         return;
-      }
-      if (!M.isSwinging()) {
-         LivingEntity Tgt = M.getTarget();
-         boolean targetIsPlayer = Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && !Server_Player.isSpectator();
-         boolean navigatingToSense = Tgt == null && M.getNavigation() != null && M.getNavigation().getTargetPos() != null;
-         if (targetIsPlayer || navigatingToSense) {
-            GetBlockingBlock Blocking_Block = new GetBlockingBlock(Entity_Class);
-            boolean isFaceBlocked = Blocking_Block.Current_Block != null && !Blocking_Block.Current_Block.defaultBlockState().isAir();
-            boolean isFeetBlocked = Blocking_Block.Feet_Block != null && !Blocking_Block.Feet_Block.defaultBlockState().isAir();
-            if (isFaceBlocked) {
-               M.swing(M.getUsedItemHand(), SwingAnimation.DEFAULT);
-               new MobDamageBlock(Entity_Class, Blocking_Block.Current_Block, Blocking_Block.Current_Position);
-            }
-
-            if (isFeetBlocked) {
-               new MobDamageBlock(Entity_Class, Blocking_Block.Feet_Block, Blocking_Block.Feet_Position);
-            }
-         }
-      }
+      tryDig(Entity_Class);
    }
 
-   boolean isAtLevel(Monster M, Entity Tgt) {
-      double M_Y = M.blockPosition().getY();
-      double Tgt_Y = Tgt.blockPosition().getY();
-      double Dist = M_Y - Tgt_Y;
-      Dist = Math.abs(Dist);
-      return Dist < this.DigDist;
+   public static void tryDig(Entity Entity_Class) {
+      if (!(Entity_Class instanceof Monster M) || M.isSwinging()) {
+         return;
+      }
+      // Unobstructed zombies actively following a path skip block probes.
+      if (!M.horizontalCollision && (M.getNavigation() == null || M.getNavigation().isInProgress())) {
+         return;
+      }
+      LivingEntity Tgt = M.getTarget();
+      boolean targetIsPlayer = Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && !Server_Player.isSpectator();
+      boolean navigatingToSense = Tgt == null && M.getNavigation() != null && M.getNavigation().getTargetPos() != null;
+      if (targetIsPlayer || navigatingToSense) {
+         Level lvl = MobInfo.GetMobLevel(M);
+         BlockPos facePos = GetBlockingBlock.computeForwardBlockPos(M);
+         Block faceBlock = MobInfo.isServerPosLoaded(lvl, facePos) ? lvl.getBlockState(facePos).getBlock() : null;
+         BlockPos feetPos = facePos.below();
+         Block feetBlock = MobInfo.isServerPosLoaded(lvl, feetPos) ? lvl.getBlockState(feetPos).getBlock() : null;
+
+         boolean isFaceBlocked = faceBlock != null && !BlockInfo.isAir(faceBlock);
+         boolean isFeetBlocked = feetBlock != null && !BlockInfo.isAir(feetBlock);
+         if (isFaceBlocked) {
+            M.swing(M.getUsedItemHand(), SwingAnimation.DEFAULT);
+            MobDamageBlock.damageBlock(Entity_Class, faceBlock, facePos);
+         }
+         if (isFeetBlocked) {
+            MobDamageBlock.damageBlock(Entity_Class, feetBlock, feetPos);
+         }
+      }
    }
 }

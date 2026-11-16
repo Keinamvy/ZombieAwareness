@@ -11,6 +11,21 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
+/**
+ * Isolated Zombie Build Ability — Horizontal Bridging.
+ *
+ * <p>Places {@link Blocks#COBBLESTONE} one block below and ahead of a zombie when it is at roughly
+ * the same Y level as a survival player target ({@code |targetY - mobY| < 2}), between 2 and 24
+ * blocks away horizontally, and facing an open two-block drop.
+ *
+ * <p><b>Dependencies:</b> {@link MobPlaceBlock} (handles safe server-side block placement, loaded
+ * chunk verification, and unbreakable/block-entity protection).
+ *
+ * <p><b>Current Status:</b> Intentionally isolated and disabled while {@code BRIDGE_PILLAR} returns
+ * {@code false} in {@link com.nll.nightmareesm.nightmareesm#canUseBehaviorForStage(String, int)} and
+ * {@link com.nll.nightmareesm.ESMConfig#AllowZombieBuilding} defaults to {@code false}. Retained so
+ * horizontal bridging can be re-enabled from {@code nightmareesm.LivingMobTick} in the future.
+ */
 public class MobBuildBridge {
    Block Block_Type = Blocks.COBBLESTONE;
    public boolean isDoing;

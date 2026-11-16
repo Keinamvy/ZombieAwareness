@@ -22,7 +22,6 @@ public abstract class MixinTargettingFabric {
         Optional<? extends LivingEntity> optional = targetFinder.get(serverLevel, mob);
         if (optional.isPresent()) {
             LivingEntity livingEntity = optional.get();
-            ZAUtil.test(mob, livingEntity);
             if (mob.canAttack(livingEntity)) {
                 ZAUtil.hookSetAttackTarget(mob, livingEntity);
             }

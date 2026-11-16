@@ -16,6 +16,22 @@ import net.minecraft.world.phys.Vec3;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+/**
+ * Isolated Zombie Build Ability — Vertical Pillar Building.
+ *
+ * <p>Places a {@link Blocks#COBBLESTONE} pillar block and steps the zombie upward when its
+ * survival player target is 1.5 to 24 blocks above it and within 16 blocks horizontally, provided
+ * headroom above the mob is clear and target chunks are loaded.
+ *
+ * <p><b>Dependencies:</b> {@link MobPlaceBlock} (safe server-side block placement),
+ * {@link SnapToBlockCenter} (re-centers the mob onto the block after stepping upward), and
+ * {@link com.nll.nightmareesm.PositionInfo}.
+ *
+ * <p><b>Current Status:</b> Intentionally isolated and disabled while {@code BRIDGE_PILLAR} returns
+ * {@code false} in {@link com.nll.nightmareesm.nightmareesm#canUseBehaviorForStage(String, int)} and
+ * {@link com.nll.nightmareesm.ESMConfig#AllowZombieBuilding} defaults to {@code false}. Retained so
+ * vertical pillaring can be re-enabled from {@code nightmareesm.LivingMobTick} in the future.
+ */
 public class MobBuildUp {
    private static final Logger LOGGER = LogManager.getLogger();
    int BuildUpDist = 4;

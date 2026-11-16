@@ -71,11 +71,39 @@ public final class HordeCollisionPolicy {
         );
     }
 
+    /**
+     * Pure predicate determining whether {@code pushEntities()} can be short-circuited completely at HEAD.
+     */
+    public static boolean shouldSkipPushEntitiesForSelf(
+            boolean selfIsHorde,
+            boolean enabled,
+            boolean disableCollision,
+            boolean hordeToHordeOnly,
+            boolean fastSkipWhenNoPlayerNear,
+            boolean hasNearbyPlayer) {
+        if (!enabled || !disableCollision || !selfIsHorde) {
+            return false;
+        }
+        if (!hordeToHordeOnly) {
+            return true;
+        }
+        return fastSkipWhenNoPlayerNear && !hasNearbyPlayer;
+    }
+
     public static boolean shouldSkipPushEntitiesScan(Entity self) {
         if (!HordeOptimizerConfig.enabled || !HordeOptimizerConfig.disableHordeCollision) {
             return false;
         }
-        return !HordeOptimizerConfig.hordeToHordeCollisionOnly && HordeMobDetector.isHordeEntity(self);
+        if (!HordeMobDetector.isHordeEntity(self)) {
+            return false;
+        }
+        if (!HordeOptimizerConfig.hordeToHordeCollisionOnly) {
+            return true;
+        }
+        if (HordeOptimizerConfig.fastSkipPushEntitiesWhenNoPlayerNear && self.level() != null) {
+            return self.level().getNearestPlayer(self, HordeOptimizerConfig.fastSkipPushPlayerCheckRadius) == null;
+        }
+        return false;
     }
 
     public static boolean shouldFilterPushScanForSelf(Entity self) {

@@ -2,13 +2,10 @@ package com.nll.nightmareesm;
 
 import com.nll.nightmareesm.Base.NightmareCreeper;
 import com.nll.nightmareesm.Base.NightmareSkeleton;
-import com.nll.nightmareesm.Base.NightmareSpider;
 import com.nll.nightmareesm.Base.NightmareZombie;
 import com.nll.nightmareesm.MobBehavs.CreeperBreachWalls;
 import com.nll.nightmareesm.MobBehavs.MobBloodlust;
 import com.nll.nightmareesm.MobBehavs.MobBreakLightSources;
-import com.nll.nightmareesm.MobBehavs.MobBuildBridge;
-import com.nll.nightmareesm.MobBehavs.MobBuildUp;
 import com.nll.nightmareesm.MobBehavs.MobDig;
 import com.nll.nightmareesm.MobBehavs.MobDigDown;
 import com.nll.nightmareesm.MobBehavs.MobDigUp;
@@ -17,7 +14,6 @@ import com.nll.nightmareesm.MobBehavs.MobScreamerAlert;
 import com.nll.nightmareesm.MobBehavs.MobStartFires;
 import com.nll.nightmareesm.MobBehavs.MobTargetPlayer;
 import com.nll.nightmareesm.MobBehavs.SpiderShootWeb;
-import com.nll.nightmareesm.helpers.ConfigHelper;
 import java.util.Locale;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -76,7 +72,7 @@ public final class nightmareesm implements ModInitializer {
    }
 
    public static boolean ShouldDuplicate() {
-      int RNG_Val = new RNG().GetInt(0, 100);
+      int RNG_Val = RNG.getInt(0, 100);
       return RNG_Val < (Integer)ESMConfig.DuplicationChance.get();
    }
 
@@ -96,6 +92,8 @@ public final class nightmareesm implements ModInitializer {
          case "SCREAMER_SCOUT":
             return stageNumber >= 7;
          case "BRIDGE_PILLAR":
+            // Isolated Zombie Build ability: disabled per design, retained in MobBuildBridge/MobBuildUp/MobPlaceBlock.
+            // To re-enable at Stage 8+, change to: return stageNumber >= 8;
             return false;
          case "JUGGERNAUT_CRAWLER":
             return stageNumber >= 9;
@@ -116,18 +114,18 @@ public final class nightmareesm implements ModInitializer {
 
    public static void LivingMobTick(Entity Entity_Class, int currentStage, boolean isBloodmoon) {
       if (Entity_Class instanceof Mob Entity_Mob) {
-         if (Entity_Mob.entityTags().contains("za_crawler")) {
+         if (Entity_Mob.entityTags().contains("za_crawler") && Entity_Mob.getPose() != net.minecraft.world.entity.Pose.SWIMMING) {
             Entity_Mob.setPose(net.minecraft.world.entity.Pose.SWIMMING);
          }
          Level Lvl = MobInfo.GetMobLevel(Entity_Mob);
-         if (isTick(Entity_Mob) && (isBloodmoon || isSiegeDay(Entity_Mob) || Entity_Mob.entityTags().contains("za_horde_mob") || Entity_Mob.entityTags().contains("za_tnt_sapper")) && Lvl != null && !Lvl.isClientSide()) {
-            new MobTargetPlayer(Entity_Class, isBloodmoon);
+         if (Lvl != null && !Lvl.isClientSide() && isTick(Entity_Mob)
+               && (Entity_Mob.entityTags().contains("za_horde_mob") || Entity_Mob.entityTags().contains("za_tnt_sapper") || isBloodmoon || isSiegeDay(Entity_Mob))) {
+            MobTargetPlayer.tickTarget(Entity_Class, isBloodmoon);
 
             if (Entity_Class instanceof Creeper C) {
                if (canUseBehaviorForStage("CREEPER_BREACH", currentStage) && (Boolean)ESMConfig.isCreeperBreachingAllowed.get()) {
-                  new CreeperBreachWalls(C);
+                  CreeperBreachWalls.tick(C);
                }
-               NightmareCreeper.CreeperTick(C);
             }
 
             if (Entity_Class instanceof Zombie zombie) {
@@ -163,30 +161,41 @@ public final class nightmareesm implements ModInitializer {
                      }
 
                      if (!isBlockedByPickaxeRule) {
-                        int Curr_Dig_Cycle = Clocker.GetIndexFromTime(3);
-                        switch (Curr_Dig_Cycle) {
-                           case 0:
-                              new MobDig(Entity_Class);
-                              break;
-                           case 1:
-                              new MobDigUp(Entity_Mob);
-                              break;
-                           case 2:
-                              new MobDigDown(Entity_Mob);
-                              break;
+                        net.minecraft.world.entity.LivingEntity digTarget = Entity_Mob.getTarget();
+                        if (digTarget != null && digTarget.blockPosition().getY() > Entity_Mob.blockPosition().getY()) {
+                           MobDigUp.tryDigUp(Entity_Mob);
+                        } else if (digTarget != null && digTarget.blockPosition().getY() < Entity_Mob.blockPosition().getY()) {
+                           MobDigDown.tryDigDown(Entity_Mob);
+                        } else {
+                           MobDig.tryDig(Entity_Class);
                         }
                      }
                   }
                }
 
+               /*
+                * =====================================================================================
+                * ISOLATED ZOMBIE BUILD ABILITY (Bridging & Vertical Pillaring)
+                * -------------------------------------------------------------------------------------
+                * Preserved for future re-enablement. To re-enable:
+                *   1. Enable "BRIDGE_PILLAR" in canUseBehaviorForStage(String, int) (e.g. stage >= 8)
+                *   2. Set ESMConfig.AllowZombieBuilding ("iszombiebuilding") to true
+                *   3. Uncomment the block below:
+                *
+                * if (canUseBehaviorForStage("BRIDGE_PILLAR", currentStage) && (Boolean)ESMConfig.AllowZombieBuilding.get()) {
+                *    new com.nll.nightmareesm.MobBehavs.MobBuildBridge(zombie);
+                *    new com.nll.nightmareesm.MobBehavs.MobBuildUp(zombie);
+                * }
+                * =====================================================================================
+                */
 
                if (canUseBehaviorForStage("TNT_SAPPER", currentStage) && (Boolean)ESMConfig.ZombiesLayTNT.get()) {
-                  new MobPlaceTNT(Entity_Class);
+                  MobPlaceTNT.tryPlace(Entity_Class);
                }
 
                if (canUseBehaviorForStage("START_FIRES", currentStage) && (Boolean)ESMConfig.ZombiesLightFires.get()) {
                   Mob Mob_Class = (Monster)Entity_Class;
-                  new MobStartFires(Mob_Class);
+                  MobStartFires.tryStartFire(Mob_Class);
                }
             }
 
@@ -205,7 +214,7 @@ public final class nightmareesm implements ModInitializer {
             if ((Entity_Class instanceof Spider || Entity_Class instanceof CaveSpider)
                && canUseBehaviorForStage("SPIDER_WEB", currentStage)
                && (Boolean)ESMConfig.SpidersShootWebs.get()) {
-               new SpiderShootWeb(Entity_Mob);
+               SpiderShootWeb.tryShoot(Entity_Mob);
             }
          }
       }
@@ -249,29 +258,27 @@ public final class nightmareesm implements ModInitializer {
             EntityType<?> resolvedType = Entity_Class.getType();
             if (resolvedType != null && Entity_Class instanceof Zombie z) {
                boolean allowPickaxe = canUseBehaviorForStage("PICKAXE_DIG", currentStage);
-               new NightmareZombie(z, allowPickaxe);
+               NightmareZombie.apply(z, allowPickaxe);
 
                if (canRollAsScreamer(Spawn_Reason, currentStage)) {
-                  if (new RNG().GetInt(0, 100) < 8) {
+                  if (RNG.getInt(0, 100) < 8) {
                      makeScreamer(z);
                   }
                }
 
                if (canUseBehaviorForStage("JUGGERNAUT_CRAWLER", currentStage)) {
-                  if (new RNG().GetInt(0, 100) < 12) {
+                  if (RNG.getInt(0, 100) < 12) {
                      applyJuggernautLoadout(z);
                   }
                }
             }
 
             if (Entity_Class instanceof Creeper && (Boolean)ESMConfig.isChargedCreeperAllowed.get()) {
-               new NightmareCreeper(Entity_Class, (Double)ESMConfig.ChargedCreeperChance.get());
+               NightmareCreeper.apply(Entity_Class, (Double)ESMConfig.ChargedCreeperChance.get());
             }
 
             if (Entity_Class instanceof Skeleton) {
-               new NightmareSkeleton(M);
-            } else if (Entity_Class instanceof Spider) {
-               new NightmareSpider(Entity_Class);
+               NightmareSkeleton.apply(M);
             }
 
             if ((Boolean)ESMConfig.Entity_Duplication.get()) {
@@ -286,9 +293,9 @@ public final class nightmareesm implements ModInitializer {
                   && serverLvl.getServer().isSameThread();
 
                if (canDuplicateOnFinalizeSpawn(Spawn_Reason, isLiveServerLevel, isServerThread)) {
-                  int TotalDupes = new RNG().GetInt(MinDupes, MaxDupes + 1);
+                  int TotalDupes = RNG.getInt(MinDupes, MaxDupes + 1);
                   if (nightmareesm.ShouldDuplicate()) {
-                     new DuplicateMob(M, TotalDupes);
+                     DuplicateMob.duplicate(M, TotalDupes);
                   }
                }
 
@@ -299,15 +306,15 @@ public final class nightmareesm implements ModInitializer {
                      MinDungeonDupes = MaxDungeonDupes;
                   }
 
-                  int TotalDupes = new RNG().GetInt(MinDungeonDupes, MaxDungeonDupes + 1);
-                  new DuplicateMob(M, TotalDupes);
+                  int TotalDupes = RNG.getInt(MinDungeonDupes, MaxDungeonDupes + 1);
+                  DuplicateMob.duplicate(M, TotalDupes);
                }
             }
 
             if ((Boolean)ESMConfig.AngryEntities.get() && canUseBehaviorForStage("BLOODLUST", currentStage)) {
-               float Bloodlust_RNG = new RNG().GetInt(0, 100);
+               float Bloodlust_RNG = RNG.getInt(0, 100);
                if (Bloodlust_RNG < ((Integer)ESMConfig.AngryEntityChance.get()).intValue()) {
-                  new MobBloodlust(Entity_Class);
+                  MobBloodlust.apply(Entity_Class);
                }
             }
          }
@@ -333,7 +340,7 @@ public final class nightmareesm implements ModInitializer {
    public static void applyJuggernautLoadout(Zombie z) {
       if (z != null) {
          z.addTag("za_juggernaut");
-         new GiveRandomArmor(z, true);
+         GiveRandomArmor.give(z, true);
          var attr = z.getAttribute(Attributes.KNOCKBACK_RESISTANCE);
          if (attr != null) {
             attr.setBaseValue(0.85D);
@@ -348,7 +355,7 @@ public final class nightmareesm implements ModInitializer {
       }
       if (canUseBehaviorForStage("BLOODLUST", currentStage)) {
          if (mob instanceof Zombie) {
-            new MobBloodlust(mob);
+            MobBloodlust.apply(mob);
          }
       }
 
@@ -379,26 +386,15 @@ public final class nightmareesm implements ModInitializer {
       }
    }
 
+   public static boolean isStaggeredTick(long gameTime, int entityId) {
+      return Math.floorMod(gameTime + entityId, 20L) == 0L;
+   }
+
    public static boolean isTick(Mob Curr_Mob) {
       Level Lvl = MobInfo.GetMobLevel(Curr_Mob);
       if (Lvl != null && !Lvl.isClientSide()) {
-         long Uptime = Lvl.getGameTime();
-         return Uptime % 20L == 0L;
-      } else {
-         return false;
+         return isStaggeredTick(Lvl.getGameTime(), Curr_Mob.getId());
       }
-   }
-
-   public static EntityType<?>[] GetEntitiesFromSerialized(String SerialList) {
-      String[] Entity_String_List = SerialList.split(",");
-      EntityType<?>[] RetVal = new EntityType<?>[Entity_String_List.length];
-
-      for (int i = 0; i < Entity_String_List.length; i++) {
-         String Entity_Str = Entity_String_List[i];
-         EntityType<?> Entity_Type_Class = ConfigHelper.GetEntityTypeFromName(Entity_Str);
-         RetVal[i] = Entity_Type_Class;
-      }
-
-      return RetVal;
+      return false;
    }
 }

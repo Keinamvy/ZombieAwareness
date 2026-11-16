@@ -19,6 +19,8 @@ public enum ZDayStage {
     STAGE_9_JUGGERNAUTS_AND_CRAWLERS(9, "Armored Juggernauts & Crawlers", "Heavy-armored Juggernauts soak rifle rounds in front; critically wounded zombies drop into fast ankle-biting Crawlers."),
     STAGE_10_TOTAL_COLLAPSE(10, "Demolition Sappers & Total Collapse", "Zombies deploy TNT and light fires, Creepers breach walls on blocked paths, and Bloodmoon swarms double.");
 
+    private static final ZDayStage[] STAGES = values();
+
     private final int stageNumber;
     private final String title;
     private final String description;
@@ -59,7 +61,7 @@ public enum ZDayStage {
 
     public static ZDayStage getStageForDay(int worldDay) {
         ZDayStage highest = STAGE_1_OUTBREAK;
-        for (ZDayStage stage : values()) {
+        for (ZDayStage stage : STAGES) {
             if (worldDay >= stage.getUnlockDay()) {
                 if (stage.getStageNumber() > highest.getStageNumber()) {
                     highest = stage;
@@ -71,7 +73,7 @@ public enum ZDayStage {
 
     public static List<ZDayStage> getUnlockedStagesBetween(int oldStageNum, int newStageNum) {
         List<ZDayStage> list = new ArrayList<>();
-        for (ZDayStage stage : values()) {
+        for (ZDayStage stage : STAGES) {
             if (stage.stageNumber > oldStageNum && stage.stageNumber <= newStageNum) {
                 list.add(stage);
             }
@@ -82,7 +84,7 @@ public enum ZDayStage {
 
     public static List<ZDayStage> getAllUnlockedStages(int currentStageNum) {
         List<ZDayStage> list = new ArrayList<>();
-        for (ZDayStage stage : values()) {
+        for (ZDayStage stage : STAGES) {
             if (stage.stageNumber <= currentStageNum) {
                 list.add(stage);
             }
@@ -92,7 +94,7 @@ public enum ZDayStage {
     }
 
     public static ZDayStage getByNumber(int stageNumber) {
-        for (ZDayStage stage : values()) {
+        for (ZDayStage stage : STAGES) {
             if (stage.stageNumber == stageNumber) {
                 return stage;
             }

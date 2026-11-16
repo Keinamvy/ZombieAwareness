@@ -40,7 +40,7 @@ public class MobScreamerAlert {
          serverLevel.playSound(null, zombie.getX(), zombie.getY(), zombie.getZ(), SoundEvents.WARDEN_ROAR, SoundSource.HOSTILE, 2.5F, 1.0F);
          serverLevel.playSound(null, zombie.getX(), zombie.getY(), zombie.getZ(), SoundEvents.GHAST_SCREAM, SoundSource.HOSTILE, 2.0F, 1.0F);
          zombie.addEffect(new MobEffectInstance(MobEffects.SPEED, 400, 1));
-         new DuplicateMob(zombie, 3);
+         DuplicateMob.duplicate(zombie, 3);
          return true;
       }
       return false;

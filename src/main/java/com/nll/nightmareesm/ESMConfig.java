@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +20,11 @@ public class ESMConfig {
    private static final Logger LOGGER = LoggerFactory.getLogger("nightmareesm-config");
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
    private static final List<ConfigValue<?>> ALL_CONFIGS = Collections.synchronizedList(new ArrayList<>());
+   private static final AtomicInteger CONFIG_EPOCH = new AtomicInteger(0);
+
+   public static int getConfigEpoch() {
+      return CONFIG_EPOCH.get();
+   }
 
    public static class ConfigValue<T> {
       protected final String key;
@@ -44,6 +50,7 @@ public class ESMConfig {
       @SuppressWarnings("unchecked")
       public void set(T val) {
          this.value = val instanceof List<?> list ? (T) List.copyOf(list) : val;
+         CONFIG_EPOCH.incrementAndGet();
       }
 
       public String getKey() {
@@ -86,11 +93,16 @@ public class ESMConfig {
    public static final IntValue ZombieTNTDistance = new IntValue("zombietntdistance", "How close zombies need to be to player to allow setting TNT. Default=4 blocks.", 4);
    public static final BooleanValue AllowZombieGriefing = new BooleanValue("iszombiegriefing", "Allow Zombies To Destroy Blocks?", true);
    public static final BooleanValue AllowZombieGriefingOnlyIfPickaxe = new BooleanValue("iszombiedigifpickaxeonly", "If true, zombies can only destroy blocks if they have a pickaxe.", false);
+   /**
+    * Reserved configuration flag for the isolated Zombie Build ability
+    * ({@link com.nll.nightmareesm.MobBehavs.MobBuildBridge} and {@link com.nll.nightmareesm.MobBehavs.MobBuildUp}).
+    * Currently unused because {@code BRIDGE_PILLAR} is disabled in {@code nightmareesm.canUseBehaviorForStage};
+    * retained for future re-enablement.
+    */
    public static final BooleanValue AllowZombieBuilding = new BooleanValue("iszombiebuilding", "Allow Zombies To Place Blocks?", false);
    public static final DoubleValue ZombieDigHeightDistance = new DoubleValue("zombiedigheightdistance", "If the height distance (mob to player) less than this #, mob will start digging.", 16.0);
    public static final DoubleValue ZombieDigProximity = new DoubleValue("zombiedigproximity", "If entity is within circle defined by XZ proximity to target, start digging.", 8.0);
    public static final BooleanValue isCreeperBreachingAllowed = new BooleanValue("iscreeperbreaching", "Can Creepers Breach Walls?", true);
-   public static final BooleanValue AllowSleeping = new BooleanValue("allowsleep", "Allow Sleeping?", false);
    public static final BooleanValue AllowMonsterInfighting = new BooleanValue("allowmonsterinfighting", "Allow Monster Infighting?", false);
    public static final BooleanValue ZombiesLightFires = new BooleanValue("zombieslightfires", "Allow Zombies and Piglins to light flammable things on fire?", true);
    public static final BooleanValue AllowSuperSkeletons = new BooleanValue("allowsuperskeletons", "Allow Super Skeletons to Spawn in the Game?", true);

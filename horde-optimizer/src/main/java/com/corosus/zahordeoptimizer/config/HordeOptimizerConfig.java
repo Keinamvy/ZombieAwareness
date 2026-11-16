@@ -24,6 +24,8 @@ public final class HordeOptimizerConfig {
     public static volatile boolean preventHordeEntityCramming = true;
     public static volatile boolean makeHordeMobsUnpushable = false;
     public static volatile boolean includeNearbyHostilesInActiveHorde = false;
+    public static volatile boolean fastSkipPushEntitiesWhenNoPlayerNear = true;
+    public static volatile double fastSkipPushPlayerCheckRadius = 3.0;
 
     // Feature 2: Spatial cluster optimization
     public static volatile boolean enableClusterOptimization = true;
@@ -48,6 +50,8 @@ public final class HordeOptimizerConfig {
         preventHordeEntityCramming = true;
         makeHordeMobsUnpushable = false;
         includeNearbyHostilesInActiveHorde = false;
+        fastSkipPushEntitiesWhenNoPlayerNear = true;
+        fastSkipPushPlayerCheckRadius = 3.0;
         enableClusterOptimization = true;
         clusterCellSizeXZ = 6;
         clusterCellSizeY = 8;
@@ -79,6 +83,8 @@ public final class HordeOptimizerConfig {
                 preventHordeEntityCramming = parseBoolean(props, "preventHordeEntityCramming", preventHordeEntityCramming);
                 makeHordeMobsUnpushable = parseBoolean(props, "makeHordeMobsUnpushable", makeHordeMobsUnpushable);
                 includeNearbyHostilesInActiveHorde = parseBoolean(props, "includeNearbyHostilesInActiveHorde", includeNearbyHostilesInActiveHorde);
+                fastSkipPushEntitiesWhenNoPlayerNear = parseBoolean(props, "fastSkipPushEntitiesWhenNoPlayerNear", fastSkipPushEntitiesWhenNoPlayerNear);
+                fastSkipPushPlayerCheckRadius = Math.max(1.0, parseDouble(props, "fastSkipPushPlayerCheckRadius", fastSkipPushPlayerCheckRadius));
                 enableClusterOptimization = parseBoolean(props, "enableClusterOptimization", enableClusterOptimization);
                 clusterCellSizeXZ = Math.max(2, parseInt(props, "clusterCellSizeXZ", clusterCellSizeXZ));
                 clusterCellSizeY = Math.max(2, parseInt(props, "clusterCellSizeY", clusterCellSizeY));
@@ -112,6 +118,8 @@ public final class HordeOptimizerConfig {
             writer.write("preventHordeEntityCramming=" + preventHordeEntityCramming + "\n");
             writer.write("makeHordeMobsUnpushable=" + makeHordeMobsUnpushable + "\n");
             writer.write("includeNearbyHostilesInActiveHorde=" + includeNearbyHostilesInActiveHorde + "\n");
+            writer.write("fastSkipPushEntitiesWhenNoPlayerNear=" + fastSkipPushEntitiesWhenNoPlayerNear + "\n");
+            writer.write("fastSkipPushPlayerCheckRadius=" + fastSkipPushPlayerCheckRadius + "\n");
             writer.write("enableClusterOptimization=" + enableClusterOptimization + "\n");
             writer.write("clusterCellSizeXZ=" + clusterCellSizeXZ + "\n");
             writer.write("clusterCellSizeY=" + clusterCellSizeY + "\n");

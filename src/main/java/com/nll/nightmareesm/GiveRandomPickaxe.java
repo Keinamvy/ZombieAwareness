@@ -7,7 +7,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 public class GiveRandomPickaxe {
-   Item[] Pickaxes = new Item[]{
+   private static final Item[] PICKAXES = new Item[]{
       Items.STONE_PICKAXE,
       Items.IRON_PICKAXE,
       Items.WOODEN_PICKAXE,
@@ -20,16 +20,17 @@ public class GiveRandomPickaxe {
    };
 
    public GiveRandomPickaxe(Monster M) {
-      ItemStack Pickaxe_Item_Stack = M.getItemBySlot(EquipmentSlot.MAINHAND);
-      if (Pickaxe_Item_Stack.isEmpty()) {
-         Item Pickaxe_Item = this.RandomFromList();
-         Pickaxe_Item_Stack = new ItemStack(Pickaxe_Item);
-         M.setItemSlot(EquipmentSlot.MAINHAND, Pickaxe_Item_Stack);
-      }
+      give(M);
    }
 
-   Item RandomFromList() {
-      int PickaxeIndex = new RNG().GetInt(0, this.Pickaxes.length);
-      return this.Pickaxes[PickaxeIndex];
+   public static void give(Monster M) {
+      if (M == null) {
+         return;
+      }
+      ItemStack Pickaxe_Item_Stack = M.getItemBySlot(EquipmentSlot.MAINHAND);
+      if (Pickaxe_Item_Stack.isEmpty()) {
+         Item Pickaxe_Item = PICKAXES[RNG.getInt(0, PICKAXES.length)];
+         M.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Pickaxe_Item));
+      }
    }
 }

@@ -38,6 +38,17 @@ public final class HordeMobDetector {
         if (tags == null || tags.isEmpty()) {
             return false;
         }
+        if (tags.contains(PRIMARY_HORDE_TAG)) {
+            return true;
+        }
+        if (tags.size() < HORDE_TAGS.size()) {
+            for (String tag : tags) {
+                if (HORDE_TAGS.contains(tag)) {
+                    return true;
+                }
+            }
+            return false;
+        }
         for (String tag : HORDE_TAGS) {
             if (tags.contains(tag)) {
                 return true;
@@ -66,7 +77,25 @@ public final class HordeMobDetector {
         if (entity == null) {
             return false;
         }
-        if (hasHordeTag(entity.entityTags())) {
+        Set<String> tags = entity.entityTags();
+        int tagCount = tags.size();
+        if (entity instanceof HordeEntityCache cache && entity.level() != null) {
+            long gameTick = entity.level().getGameTime();
+            long cachedTick = cache.zaho$getHordeCacheTick();
+            if (cachedTick != Long.MIN_VALUE
+                    && (gameTick - cachedTick) < 10L
+                    && cache.zaho$getHordeCacheTagCount() == tagCount) {
+                return cache.zaho$getHordeCachedValue();
+            }
+            boolean computed = computeIsHordeEntityUncached(entity, tags);
+            cache.zaho$setHordeCache(gameTick, tagCount, computed);
+            return computed;
+        }
+        return computeIsHordeEntityUncached(entity, tags);
+    }
+
+    private static boolean computeIsHordeEntityUncached(Entity entity, Collection<String> tags) {
+        if (hasHordeTag(tags)) {
             return true;
         }
         if (HordeOptimizerConfig.includeNearbyHostilesInActiveHorde

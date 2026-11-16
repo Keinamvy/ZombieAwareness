@@ -57,11 +57,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class ChunkHeatManager {
 
@@ -93,6 +93,7 @@ public class ChunkHeatManager {
     private static final Map<Long, HeatEntry> heatMap = new ConcurrentHashMap<>();
     private static final List<ActiveHorde> activeHordes = new CopyOnWriteArrayList<>();
     private static final Map<UUID, Long> playerBreatherUntilTick = new ConcurrentHashMap<>();
+    private static volatile boolean hasRecentlySeenSpecialUnitsOrTurrets = false;
 
     public enum HordePhase {
         PHASE_1A_FAST_ZOMBIES,
@@ -123,6 +124,8 @@ public class ChunkHeatManager {
         public volatile int rampageElapsedTicks = 0;
         public volatile int rampageDurationTicks = DEFAULT_HORDE_RAMPAGE_DURATION_TICKS;
         public volatile int rampageInitialMobCount = 0;
+        public volatile long lastFortifiedCheckTick = -1L;
+        public volatile BlockPos lastFortifiedCheckPos = null;
 
         public boolean isFullyExpired() {
             return rampagePhaseActive
@@ -150,7 +153,7 @@ public class ChunkHeatManager {
         }
 
         public ActiveHorde(BlockPos center, Set<UUID> targetGroupPlayerIds, int totalDurationTicks, int subWaveCount, int worldStageNum) {
-            this(center, targetGroupPlayerIds, totalDurationTicks, subWaveCount, worldStageNum, new Random().nextDouble() * 2.0 * Math.PI);
+            this(center, targetGroupPlayerIds, totalDurationTicks, subWaveCount, worldStageNum, ThreadLocalRandom.current().nextDouble() * 2.0 * Math.PI);
         }
 
         public ActiveHorde(BlockPos center, int totalDurationTicks, int subWaveCount, int worldStageNum) {
@@ -380,7 +383,7 @@ public class ChunkHeatManager {
     }
 
     public static boolean tryRegisterHordeForGroup(BlockPos center, Collection<UUID> groupPlayerIds, int nearbyPlayers, int subWaveCount, int worldStageNum) {
-        return tryRegisterHordeForGroup(center, groupPlayerIds, nearbyPlayers, subWaveCount, worldStageNum, new Random().nextDouble() * 2.0 * Math.PI);
+        return tryRegisterHordeForGroup(center, groupPlayerIds, nearbyPlayers, subWaveCount, worldStageNum, ThreadLocalRandom.current().nextDouble() * 2.0 * Math.PI);
     }
 
     public static List<ActiveHorde> getActiveHordes() {
@@ -473,8 +476,15 @@ public class ChunkHeatManager {
         {-1, 0}, {-1, -1}, {0, -1}, {1, -1}
     };
 
+    private static AABB hordeSearchBox(BlockPos center, double radius) {
+        double cx = center.getX() + 0.5;
+        double cy = center.getY() + 0.5;
+        double cz = center.getZ() + 0.5;
+        return new AABB(cx - radius, cy - radius, cz - radius, cx + radius, cy + radius, cz + radius);
+    }
+
     public static boolean isChunkLoadedAt(ServerLevel level, int blockX, int blockZ) {
-        return level != null && level.isLoaded(new BlockPos(blockX, 0, blockZ));
+        return level != null && level.hasChunk(blockX >> 4, blockZ >> 4);
     }
 
     private static boolean areRayChunksLoaded(ServerLevel level, Vec3 start, Vec3 end) {
@@ -485,13 +495,11 @@ public class ChunkHeatManager {
         double dz = end.z - start.z;
         double horizDist = Math.hypot(dx, dz);
         int steps = Math.max(1, (int) Math.ceil(horizDist / 8.0));
-        BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
         for (int i = 0; i <= steps; i++) {
             double t = (double) i / (double) steps;
             int bx = (int) Math.floor(start.x + dx * t);
             int bz = (int) Math.floor(start.z + dz * t);
-            probe.set(bx, 0, bz);
-            if (!level.isLoaded(probe)) {
+            if (!level.hasChunk(bx >> 4, bz >> 4)) {
                 return false;
             }
         }
@@ -549,6 +557,12 @@ public class ChunkHeatManager {
             if (blocked) {
                 blockedDirections++;
             }
+        }
+        if (blockedDirections >= 5) {
+            return true;
+        }
+        if (blockedDirections < 3) {
+            return false;
         }
         boolean hasRoofOrBase = (level.isLoaded(scanCenter) && !level.canSeeSkyFromBelowWater(scanCenter))
                 || hasNearbyBaseBlockEntity(level, center, 8);
@@ -617,16 +631,15 @@ public class ChunkHeatManager {
         double cx = horde.center.getX() + 0.5;
         double cy = horde.center.getY() + 0.5;
         double cz = horde.center.getZ() + 0.5;
-        int enraged = 0;
-        for (Entity entity : level.getAllEntities()) {
-            if (entity instanceof Mob m && m.isAlive() && ZAUtil.isHordeMob(m)) {
-                if (m.distanceToSqr(cx, cy, cz) <= radiusSq) {
-                    applyRampageBuffs(m);
-                    enraged++;
-                }
-            }
+        List<Mob> nearby = level.getEntitiesOfClass(
+                Mob.class,
+                hordeSearchBox(horde.center, radius),
+                m -> m != null && m.isAlive() && ZAUtil.isHordeMob(m) && m.distanceToSqr(cx, cy, cz) <= radiusSq
+        );
+        for (Mob m : nearby) {
+            applyRampageBuffs(m);
         }
-        return enraged;
+        return nearby.size();
     }
 
     public static boolean shouldReinforceHorde(ActiveHorde horde) {
@@ -655,16 +668,16 @@ public class ChunkHeatManager {
     }
 
     public static int disperseHordeMobsAround(ServerLevel level, BlockPos center, double radius, double discardFraction) {
-        if (level == null || center == null) return 0;
+        if (level == null || center == null || radius <= 0) return 0;
         double radiusSq = radius * radius;
-        List<Mob> mobs = new ArrayList<>();
-        for (Entity entity : level.getAllEntities()) {
-            if (entity instanceof Mob m && m.isAlive() && m.entityTags().contains("za_horde_mob")) {
-                if (m.distanceToSqr(center.getX() + 0.5, center.getY() + 0.5, center.getZ() + 0.5) <= radiusSq) {
-                    mobs.add(m);
-                }
-            }
-        }
+        double cx = center.getX() + 0.5;
+        double cy = center.getY() + 0.5;
+        double cz = center.getZ() + 0.5;
+        List<Mob> mobs = level.getEntitiesOfClass(
+                Mob.class,
+                hordeSearchBox(center, radius),
+                m -> m != null && m.isAlive() && m.entityTags().contains("za_horde_mob") && m.distanceToSqr(cx, cy, cz) <= radiusSq
+        );
         if (mobs.isEmpty()) return 0;
         int keepCount = (int) Math.floor(mobs.size() * (1.0 - discardFraction));
         int discardTarget = mobs.size() - keepCount;
@@ -868,6 +881,7 @@ public class ChunkHeatManager {
         heatMap.clear();
         clearActiveHordes();
         playerBreatherUntilTick.clear();
+        hasRecentlySeenSpecialUnitsOrTurrets = false;
         HordeSpecialUnitHelper.clearAllState();
     }
 
@@ -1043,7 +1057,28 @@ public class ChunkHeatManager {
         BlockPos.MutableBlockPos feetPos = new BlockPos.MutableBlockPos();
         BlockPos.MutableBlockPos abovePos = new BlockPos.MutableBlockPos();
 
+        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        boolean surfaceValid = false;
+        feetPos.set(x, surfaceY, z);
+        belowPos.set(x, surfaceY - 1, z);
+        abovePos.set(x, surfaceY + 1, z);
+        if (level.isLoaded(belowPos) && level.isLoaded(feetPos) && level.isLoaded(abovePos)) {
+            BlockState belowState = level.getBlockState(belowPos);
+            BlockState feetState = level.getBlockState(feetPos);
+            BlockState headState = level.getBlockState(abovePos);
+            if (isDrySolidSpawnColumn(belowState, feetState, headState)
+                    && !belowState.getCollisionShape(level, belowPos).isEmpty()) {
+                surfaceValid = true;
+                if (surfaceY >= preferredY - 12 && surfaceY <= preferredY + 8) {
+                    return surfaceY;
+                }
+            }
+        }
+
         for (int y = preferredY + 8; y >= preferredY - 12; y--) {
+            if (y == surfaceY) {
+                continue;
+            }
             feetPos.set(x, y, z);
             belowPos.set(x, y - 1, z);
             abovePos.set(x, y + 1, z);
@@ -1058,26 +1093,7 @@ public class ChunkHeatManager {
                 return y;
             }
         }
-        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-        feetPos.set(x, surfaceY, z);
-        belowPos.set(x, surfaceY - 1, z);
-        abovePos.set(x, surfaceY + 1, z);
-        if (!level.isLoaded(belowPos) || !level.isLoaded(feetPos) || !level.isLoaded(abovePos)) {
-            return NO_DRY_SPAWN_Y;
-        }
-        BlockState belowState = level.getBlockState(belowPos);
-        BlockState feetState = level.getBlockState(feetPos);
-        BlockState headState = level.getBlockState(abovePos);
-        if (isDrySolidSpawnColumn(belowState, feetState, headState)
-                && !belowState.getCollisionShape(level, belowPos).isEmpty()) {
-            return surfaceY;
-        }
-        return NO_DRY_SPAWN_Y;
-    }
-
-    public static int findSafeSpawnY(ServerLevel level, int x, int preferredY, int z) {
-        int dryY = findSafeDrySpawnY(level, x, preferredY, z);
-        return dryY != NO_DRY_SPAWN_Y ? dryY : preferredY;
+        return surfaceValid ? surfaceY : NO_DRY_SPAWN_Y;
     }
 
     public static double selectDryApproachAngle(ServerLevel level, BlockPos center, double preferredAngleRad) {
@@ -1163,15 +1179,11 @@ public class ChunkHeatManager {
         double cx = center.getX() + 0.5;
         double cy = center.getY() + 0.5;
         double cz = center.getZ() + 0.5;
-        int count = 0;
-        for (Entity entity : level.getAllEntities()) {
-            if (entity instanceof Mob mob && mob.isAlive()) {
-                if (mob.distanceToSqr(cx, cy, cz) <= radiusSq && mob.entityTags().contains("za_horde_mob")) {
-                    count++;
-                }
-            }
-        }
-        return count;
+        return level.getEntitiesOfClass(
+                Mob.class,
+                hordeSearchBox(center, radius),
+                mob -> mob != null && mob.isAlive() && mob.entityTags().contains("za_horde_mob") && mob.distanceToSqr(cx, cy, cz) <= radiusSq
+        ).size();
     }
 
     public static boolean isEligibleHordeTargetPlayer(boolean alive, boolean deadOrDying, boolean spectator, boolean creative) {
@@ -1282,40 +1294,43 @@ public class ChunkHeatManager {
         double centerY = center.getY() + 0.5;
         double centerZ = center.getZ() + 0.5;
 
+        ServerPlayer batchTarget = resolveHordeTargetPlayer(level, centerX, centerY, centerZ);
+        List<Mob> nearbyHostiles = level.getEntitiesOfClass(
+                Mob.class,
+                hordeSearchBox(center, radius),
+                mob -> mob != null && mob.isAlive() && mob.distanceToSqr(centerX, centerY, centerZ) <= radiusSq && ZAUtil.isHostileMob(mob)
+        );
         int recruited = 0;
-        for (Entity entity : level.getAllEntities()) {
-            if (entity instanceof Mob mob && mob.isAlive()) {
-                if (mob.distanceToSqr(centerX, centerY, centerZ) <= radiusSq && ZAUtil.isHostileMob(mob)) {
-                    if (!mob.entityTags().contains("za_horde_mob")) {
-                        mob.addTag("za_horde_mob");
-                    }
-                    LivingEntity currentTarget = mob.getTarget();
-                    if (currentTarget != null && ZAUtil.isVillagerEntity(currentTarget)) {
-                        mob.setTarget(null);
-                        currentTarget = null;
-                    }
-                    ServerPlayer nearestSurvival = resolveHordeTargetPlayer(level, mob.getX(), mob.getY(), mob.getZ());
-                    if (currentTarget == null || !currentTarget.isAlive()) {
-                        if (nearestSurvival != null) {
-                            mob.setTarget(nearestSurvival);
-                        }
-                    }
-                    try {
-                        if (nearestSurvival != null) {
-                            CoroUtilPath.tryMoveToEntityLivingLongDist(mob, nearestSurvival, 1.0);
-                        } else {
-                            CoroUtilPath.tryMoveToXYZLongDist(mob, center.getX(), center.getY(), center.getZ(), 1.0);
-                        }
-                    } catch (Throwable ignored) {}
-                    recruited++;
+        for (Mob mob : nearbyHostiles) {
+            if (!mob.entityTags().contains("za_horde_mob")) {
+                mob.addTag("za_horde_mob");
+            }
+            LivingEntity currentTarget = mob.getTarget();
+            if (currentTarget != null && ZAUtil.isVillagerEntity(currentTarget)) {
+                mob.setTarget(null);
+                currentTarget = null;
+            }
+            if (currentTarget == null || !currentTarget.isAlive()) {
+                if (batchTarget != null) {
+                    mob.setTarget(batchTarget);
                 }
             }
+            if (!mob.getNavigation().isInProgress()) {
+                try {
+                    if (batchTarget != null) {
+                        CoroUtilPath.tryMoveToEntityLivingLongDist(mob, batchTarget, 1.0);
+                    } else {
+                        CoroUtilPath.tryMoveToXYZLongDist(mob, center.getX(), center.getY(), center.getZ(), 1.0);
+                    }
+                } catch (Throwable ignored) {}
+            }
+            recruited++;
         }
         return recruited;
     }
 
     public static void spawnPhasedSubWave(ServerLevel level, BlockPos center, HordePhase phase, int count, int worldStageNum) {
-        spawnPhasedSubWave(level, center, new Random().nextDouble() * 2.0 * Math.PI, phase, count, worldStageNum, false);
+        spawnPhasedSubWave(level, center, ThreadLocalRandom.current().nextDouble() * 2.0 * Math.PI, phase, count, worldStageNum, false);
     }
 
     public static void spawnPhasedSubWave(ServerLevel level, BlockPos center, double approachAngleRad, HordePhase phase, int count, int worldStageNum) {
@@ -1324,7 +1339,8 @@ public class ChunkHeatManager {
 
     public static void spawnPhasedSubWave(ServerLevel level, BlockPos center, double approachAngleRad, HordePhase phase, int count, int worldStageNum, boolean surroundMode) {
         if (level == null || center == null || count <= 0) return;
-        Random rand = new Random();
+        ThreadLocalRandom rand = ThreadLocalRandom.current();
+        ServerPlayer batchTargetPlayer = resolveHordeTargetPlayer(level, center.getX() + 0.5, center.getY() + 0.5, center.getZ() + 0.5);
 
         for (int i = 0; i < count; i++) {
             float roll = rand.nextFloat();
@@ -1438,8 +1454,7 @@ public class ChunkHeatManager {
                             mob = createMobById(level, "phantom");
                         } else if (roll < 0.60f) {
                             if (roll >= 0.14f && roll < 0.26f) {
-                                ServerPlayer targetPlayer = resolveHordeTargetPlayer(level, center.getX() + 0.5, center.getY() + 0.5, center.getZ() + 0.5);
-                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, targetPlayer);
+                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, batchTargetPlayer);
                                 continue;
                             }
                             Zombie z = new Zombie(level);
@@ -1460,8 +1475,7 @@ public class ChunkHeatManager {
                             mob = createMobById(level, "phantom");
                         } else if (roll < 0.55f) {
                             if (roll >= 0.15f && roll < 0.27f) {
-                                ServerPlayer targetPlayer = resolveHordeTargetPlayer(level, center.getX() + 0.5, center.getY() + 0.5, center.getZ() + 0.5);
-                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, targetPlayer);
+                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, batchTargetPlayer);
                                 continue;
                             }
                             Zombie z = new Zombie(level);
@@ -1487,8 +1501,7 @@ public class ChunkHeatManager {
                             mob = createMobById(level, "phantom");
                         } else if (roll < 0.50f) {
                             if (roll >= 0.15f && roll < 0.27f) {
-                                ServerPlayer targetPlayer = resolveHordeTargetPlayer(level, center.getX() + 0.5, center.getY() + 0.5, center.getZ() + 0.5);
-                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, targetPlayer);
+                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, batchTargetPlayer);
                                 continue;
                             }
                             Zombie z = new Zombie(level);
@@ -1513,8 +1526,7 @@ public class ChunkHeatManager {
                             mob = createMobById(level, "phantom");
                         } else if (roll < 0.45f) {
                             if (roll >= 0.14f && roll < 0.26f) {
-                                ServerPlayer targetPlayer = resolveHordeTargetPlayer(level, center.getX() + 0.5, center.getY() + 0.5, center.getZ() + 0.5);
-                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, true, targetPlayer);
+                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, true, batchTargetPlayer);
                                 continue;
                             }
                             Zombie z = new Zombie(level);
@@ -1569,9 +1581,8 @@ public class ChunkHeatManager {
                     }
                     HordeSpecialUnitHelper.applySpecialMobIndicator(mob);
                     level.addFreshEntity(mob);
-                    ServerPlayer nearestSurvival = resolveHordeTargetPlayer(level, center.getX() + 0.5, center.getY() + 0.5, center.getZ() + 0.5);
-                    if (nearestSurvival != null) {
-                        mob.setTarget(nearestSurvival);
+                    if (batchTargetPlayer != null) {
+                        mob.setTarget(batchTargetPlayer);
                     }
                     if (isPhantom) {
                         Mob passenger = level.getRandom().nextBoolean() ? (Mob) createMobById(level, "creeper") : new Zombie(level);
@@ -1587,15 +1598,15 @@ public class ChunkHeatManager {
                                 applyHordeMobHealthScaling(passenger);
                                 level.addFreshEntity(passenger);
                                 passenger.startRiding(mob);
-                                if (nearestSurvival != null) {
-                                    passenger.setTarget(nearestSurvival);
+                                if (batchTargetPlayer != null) {
+                                    passenger.setTarget(batchTargetPlayer);
                                 }
                             }
                         }
                     }
                     try {
-                        if (nearestSurvival != null) {
-                            CoroUtilPath.tryMoveToEntityLivingLongDist(mob, nearestSurvival, 1.0);
+                        if (batchTargetPlayer != null) {
+                            CoroUtilPath.tryMoveToEntityLivingLongDist(mob, batchTargetPlayer, 1.0);
                         } else {
                             CoroUtilPath.tryMoveToXYZLongDist(mob, center.getX(), center.getY(), center.getZ(), 1.0);
                         }
@@ -1614,7 +1625,7 @@ public class ChunkHeatManager {
     }
 
     public static void triggerSwarmWave(ServerLevel level, double originX, double originY, double originZ, int waveSize, int nearbyPlayers, int stage, Collection<UUID> groupPlayerIds) {
-        triggerSwarmWave(level, originX, originY, originZ, waveSize, nearbyPlayers, stage, groupPlayerIds, new Random().nextDouble() * 2.0 * Math.PI);
+        triggerSwarmWave(level, originX, originY, originZ, waveSize, nearbyPlayers, stage, groupPlayerIds, ThreadLocalRandom.current().nextDouble() * 2.0 * Math.PI);
     }
 
     public static void triggerSwarmWave(ServerLevel level, double originX, double originY, double originZ, int waveSize, int nearbyPlayers, int stage, Collection<UUID> groupPlayerIds, double approachAngleRad) {
@@ -1633,6 +1644,11 @@ public class ChunkHeatManager {
         int subWaveCount = computeSubWaveCount(finalWaveSize);
         if (!tryRegisterHordeForGroup(center, groupPlayerIds, nearbyPlayers, subWaveCount, stage, approachAngleRad, fortified)) {
             return;
+        }
+        ActiveHorde registered = activeHordes.isEmpty() ? null : activeHordes.get(activeHordes.size() - 1);
+        if (registered != null && center.equals(registered.center)) {
+            registered.lastFortifiedCheckTick = level.getGameTime();
+            registered.lastFortifiedCheckPos = center;
         }
 
         try {
@@ -1680,15 +1696,9 @@ public class ChunkHeatManager {
 
         // 1. Ambient Late-Game Night Horde Check (runs every 1200 ticks = 60s)
         if (currentTick % 1200L == 0 && overworld.players() != null && !overworld.players().isEmpty()) {
-            int stage = 1;
-            for (int s = 10; s >= 1; s--) {
-                if (ZDayProgressionManager.isStageUnlocked(s)) {
-                    stage = s;
-                    break;
-                }
-            }
+            int stage = ZDayProgressionManager.getCurrentStage().getStageNumber();
             boolean bloodmoon = BloodmoonManager.isBloodmoonActive(overworld);
-            Random ambientRand = new Random();
+            ThreadLocalRandom ambientRand = ThreadLocalRandom.current();
 
             Set<UUID> evaluatedPlayers = new HashSet<>();
             for (ServerPlayer player : overworld.players()) {
@@ -1771,16 +1781,16 @@ public class ChunkHeatManager {
                 }
             } else {
                 horde.rampageElapsedTicks++;
-                int currentAlive = countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS);
-                if (currentAlive <= 0) {
-                    completeHordeVictory(overworld, horde, currentTick, "\u00a7a\u00a7l[!] ALL REMAINING RAMPAGING HORDE MOBS CLEARED — VICTORY IS YOURS!", toRemove);
-                    continue;
-                }
                 if (horde.rampageElapsedTicks >= horde.rampageDurationTicks) {
                     completeHordeVictory(overworld, horde, currentTick, "\u00a7a\u00a7l[!] YOU HAVE SURVIVED THE HORDE! THE UNDEAD RETREAT!", toRemove);
                     continue;
                 }
                 if (horde.rampageElapsedTicks % 20 == 0) {
+                    int currentAlive = countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS);
+                    if (currentAlive <= 0) {
+                        completeHordeVictory(overworld, horde, currentTick, "\u00a7a\u00a7l[!] ALL REMAINING RAMPAGING HORDE MOBS CLEARED — VICTORY IS YOURS!", toRemove);
+                        continue;
+                    }
                     activateRampageOnNearbyHordeMobs(overworld, horde);
                 }
             }
@@ -1845,8 +1855,15 @@ public class ChunkHeatManager {
             double progress = (double) horde.elapsedTicks / (double) horde.totalDurationTicks;
             HordePhase phase = resolveHordePhase(progress, horde.worldStageNum);
 
-            boolean fortified = isPositionFortifiedByWallsOrBase(overworld, horde.center);
-            horde.surroundMode = fortified;
+            if (horde.lastFortifiedCheckTick < 0L
+                    || (currentTick - horde.lastFortifiedCheckTick) >= 100L
+                    || horde.lastFortifiedCheckPos == null
+                    || horde.center.distSqr(horde.lastFortifiedCheckPos) > 64.0) {
+                horde.surroundMode = isPositionFortifiedByWallsOrBase(overworld, horde.center);
+                horde.lastFortifiedCheckTick = currentTick;
+                horde.lastFortifiedCheckPos = horde.center;
+            }
+            boolean fortified = horde.surroundMode;
             int currentSubWaveCount = computeFortifiedWaveCount(horde.subWaveCount, fortified);
 
             if (phase == HordePhase.PHASE_4_CLIMAX_SAPPERS && !horde.climaxRoarPlayed) {
@@ -1911,13 +1928,15 @@ public class ChunkHeatManager {
             }
 
             if (!horde.rampagePhaseActive && phase.ordinal() >= HordePhase.PHASE_4_CLIMAX_SAPPERS.ordinal()) {
-                if (horde.phase4InitialMobCount < 0) {
-                    horde.phase4InitialMobCount = Math.max(1, countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS));
-                }
-                int currentAlive = countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS);
-                if (isHordeDecimated(currentAlive, horde.phase4InitialMobCount) || currentAlive == 0) {
-                    completeHordeVictory(overworld, horde, currentTick, "\u00a7a\u00a7l[!] THE HORDE HAS BEEN OVERCOME (UNDER 2% REMAINING) \u2014 VICTORY IS YOURS!", toRemove);
-                    continue;
+                if (horde.phase4InitialMobCount < 0 || horde.elapsedTicks % 20 == 0) {
+                    int currentAlive = countAliveHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS);
+                    if (horde.phase4InitialMobCount < 0) {
+                        horde.phase4InitialMobCount = Math.max(1, currentAlive);
+                    }
+                    if (isHordeDecimated(currentAlive, horde.phase4InitialMobCount) || currentAlive == 0) {
+                        completeHordeVictory(overworld, horde, currentTick, "\u00a7a\u00a7l[!] THE HORDE HAS BEEN OVERCOME (UNDER 2% REMAINING) \u2014 VICTORY IS YOURS!", toRemove);
+                        continue;
+                    }
                 }
             }
 
@@ -1927,64 +1946,74 @@ public class ChunkHeatManager {
                 double cx = horde.center.getX() + 0.5;
                 double cy = horde.center.getY() + 0.5;
                 double cz = horde.center.getZ() + 0.5;
-                for (Entity e : overworld.getAllEntities()) {
-                    if (e instanceof Phantom phantom && phantom.isAlive() && !phantom.getPassengers().isEmpty() && phantom.entityTags().contains("za_horde_mob")) {
-                        if (phantom.distanceToSqr(cx, cy, cz) <= radiusSq) {
-                            LivingEntity target = phantom.getTarget();
-                            if (target == null) {
-                                target = overworld.getNearestPlayer(phantom, 96.0);
-                            }
-                            if (target != null) {
-                                checkAndDropPhantomPassenger(phantom, target);
-                            }
-                        }
+                List<Phantom> carrierPhantoms = overworld.getEntitiesOfClass(
+                        Phantom.class,
+                        hordeSearchBox(horde.center, GROUP_CLUSTER_RADIUS),
+                        p -> p != null && p.isAlive() && !p.getPassengers().isEmpty()
+                                && p.entityTags().contains("za_horde_mob")
+                                && p.distanceToSqr(cx, cy, cz) <= radiusSq
+                );
+                for (Phantom phantom : carrierPhantoms) {
+                    LivingEntity target = phantom.getTarget();
+                    if (target == null) {
+                        target = overworld.getNearestPlayer(phantom, 96.0);
+                    }
+                    if (target != null) {
+                        checkAndDropPhantomPassenger(phantom, target);
                     }
                 }
             }
 
             if (phaseTick % 20 == 0) {
                 double radiusSq = GROUP_CLUSTER_RADIUS * GROUP_CLUSTER_RADIUS;
-                double steerRadiusSq = (GROUP_CLUSTER_RADIUS * 1.5) * (GROUP_CLUSTER_RADIUS * 1.5);
+                double steerRadius = GROUP_CLUSTER_RADIUS * 1.5;
+                double steerRadiusSq = steerRadius * steerRadius;
                 double cx = horde.center.getX() + 0.5;
                 double cy = horde.center.getY() + 0.5;
                 double cz = horde.center.getZ() + 0.5;
                 ServerPlayer activeTargetPlayer = resolveHordeTargetPlayerForHorde(overworld, horde);
-                List<Zombie> toConvertToDrowned = new ArrayList<>();
-                for (Entity e : overworld.getAllEntities()) {
-                    if (e instanceof Mob m && m.isAlive() && ZAUtil.isHordeMob(m)) {
-                        if (HordeSpecialUnitHelper.isBloodmoonWarden(m)) {
-                            continue;
+                List<Mob> nearbyHordeMobs = overworld.getEntitiesOfClass(
+                        Mob.class,
+                        hordeSearchBox(horde.center, steerRadius),
+                        m -> m != null && m.isAlive() && ZAUtil.isHordeMob(m) && m.distanceToSqr(cx, cy, cz) <= steerRadiusSq
+                );
+                List<Zombie> toConvertToDrowned = null;
+                for (Mob m : nearbyHordeMobs) {
+                    if (HordeSpecialUnitHelper.isBloodmoonWarden(m)) {
+                        continue;
+                    }
+                    LivingEntity currentTarget = m.getTarget();
+                    if (currentTarget != null && ZAUtil.isVillagerEntity(currentTarget)) {
+                        m.setTarget(null);
+                        currentTarget = null;
+                    }
+                    if (activeTargetPlayer != null) {
+                        if (currentTarget == null || !currentTarget.isAlive()) {
+                            m.setTarget(activeTargetPlayer);
                         }
-                        if (m.distanceToSqr(cx, cy, cz) <= steerRadiusSq) {
-                            LivingEntity currentTarget = m.getTarget();
-                            if (currentTarget != null && ZAUtil.isVillagerEntity(currentTarget)) {
-                                m.setTarget(null);
-                                currentTarget = null;
-                            }
-                            if (activeTargetPlayer != null) {
-                                if (currentTarget == null || !currentTarget.isAlive()) {
-                                    m.setTarget(activeTargetPlayer);
-                                }
-                                if (m.getNavigation().isDone() && m.distanceToSqr(activeTargetPlayer) > 16.0) {
-                                    try {
-                                        CoroUtilPath.tryMoveToEntityLivingLongDist(m, activeTargetPlayer, 1.0);
-                                    } catch (Throwable ignored) {}
-                                }
-                            }
+                        if (!m.getNavigation().isInProgress() && m.getNavigation().isDone() && m.distanceToSqr(activeTargetPlayer) > 16.0) {
+                            try {
+                                CoroUtilPath.tryMoveToEntityLivingLongDist(m, activeTargetPlayer, 1.0);
+                            } catch (Throwable ignored) {}
                         }
                     }
-                    if (e instanceof Zombie z && !(z instanceof Drowned) && z.isAlive() && z.entityTags().contains("za_horde_mob")) {
+                    if (m instanceof Zombie z && !(z instanceof Drowned) && z.entityTags().contains("za_horde_mob")) {
                         if (z.distanceToSqr(cx, cy, cz) <= radiusSq) {
                             if (z.isInWater() || z.isInShallowWater() || z.isUnderWater()
                                     || (overworld.isLoaded(z.blockPosition()) && overworld.getFluidState(z.blockPosition()).is(FluidTags.WATER))) {
+                                if (toConvertToDrowned == null) {
+                                    toConvertToDrowned = new ArrayList<>();
+                                }
                                 toConvertToDrowned.add(z);
                             }
                         }
                     }
                 }
-                for (Zombie z : toConvertToDrowned) {
-                    if (z.isAlive() && !z.isRemoved()) {
-                        convertHordeZombieToDrowned(z);
+                if (toConvertToDrowned != null) {
+                    for (Zombie z : toConvertToDrowned) {
+                        if (z.isAlive() && !z.isRemoved()) {
+                            convertHordeZombieToDrowned(z);
+                        }
                     }
                 }
             }
@@ -2011,18 +2040,27 @@ public class ChunkHeatManager {
 
     private static void tickSpecialUnitsAndTurretFocus(ServerLevel overworld, long currentTick) {
         if (overworld == null) return;
+        if (activeHordes.isEmpty()
+                && !hasRecentlySeenSpecialUnitsOrTurrets
+                && !HordeSpecialUnitHelper.hasActiveWardenStates()
+                && currentTick % 40L != 0L) {
+            return;
+        }
         List<Mob> turrets = null;
         List<Mob> tankers = null;
         List<Mob> wardens = null;
+        boolean foundAnySpecialOrTurret = false;
 
         for (Entity e : overworld.getAllEntities()) {
             if (!(e instanceof Mob m) || !m.isAlive() || m.isRemoved()) {
                 continue;
             }
             if (HordeSpecialUnitHelper.isTaczTurretEntity(m)) {
+                foundAnySpecialOrTurret = true;
                 if (turrets == null) turrets = new ArrayList<>();
                 turrets.add(m);
             } else if (m instanceof Zombie z && HordeSpecialUnitHelper.isTankerZombie(z)) {
+                foundAnySpecialOrTurret = true;
                 if (tankers == null) tankers = new ArrayList<>();
                 tankers.add(z);
                 if (currentTick % 20L == 0) {
@@ -2030,16 +2068,20 @@ public class ChunkHeatManager {
                     HordeSpecialUnitHelper.ensureTankerResistanceEffect(z);
                 }
             } else if (m instanceof Zombie z && HordeSpecialUnitHelper.isKnightZombie(z)) {
+                foundAnySpecialOrTurret = true;
                 if (currentTick % 20L == 0) {
                     HordeSpecialUnitHelper.ensureKnightResistanceEffect(z);
                 }
             } else if (HordeSpecialUnitHelper.isKnightMount(m)) {
+                foundAnySpecialOrTurret = true;
                 HordeSpecialUnitHelper.steerKnightMountToRiderTarget(m);
             } else if (HordeSpecialUnitHelper.isBloodmoonWarden(m)) {
+                foundAnySpecialOrTurret = true;
                 if (wardens == null) wardens = new ArrayList<>();
                 wardens.add(m);
             }
         }
+        hasRecentlySeenSpecialUnitsOrTurrets = foundAnySpecialOrTurret;
 
         if (currentTick % 5L == 0 && turrets != null && tankers != null) {
             HordeSpecialUnitHelper.tickTurretFocus(turrets, tankers);
@@ -2197,7 +2239,7 @@ public class ChunkHeatManager {
                     entry.lastWaveTriggerTick = gameTick;
                 }
 
-                double preferredAngleRad = new Random().nextDouble() * 2.0 * Math.PI;
+                double preferredAngleRad = ThreadLocalRandom.current().nextDouble() * 2.0 * Math.PI;
                 double approachAngleRad = selectDryApproachAngle(level, triggerPos, preferredAngleRad);
                 double roarX = x + Math.cos(approachAngleRad) * 45.0;
                 double roarZ = z + Math.sin(approachAngleRad) * 45.0;

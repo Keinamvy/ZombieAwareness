@@ -35,6 +35,7 @@ public class EntityScent extends Entity {
 
     public long lastBuffTime = 0;
     public float lastMultiply = 1F;
+    private int localAge = -1;
     
     public static int MAX_AGE = 30*20;
 
@@ -90,53 +91,59 @@ public class EntityScent extends Entity {
     }
     
     public void resetAge() {
-    	this.getEntityData().set(AGE, MAX_AGE);
+        this.localAge = MAX_AGE;
+        this.getEntityData().set(AGE, MAX_AGE);
     }
     
     public int getStrengthPeak() {
-    	return this.getEntityData().get(STRENGTH_PEAK);
+        return this.getEntityData().get(STRENGTH_PEAK);
     }
     
     public int getStrengthScaled() {
-    	return (int)((double)this.getEntityData().get(this.STRENGTH_PEAK) * getAgeScale());
+        return (int)((double)this.getEntityData().get(this.STRENGTH_PEAK) * getAgeScale());
     }
     
     public double getAgeScale() {
-    	return (double)this.getEntityData().get(this.AGE) / (double)MAX_AGE;
+        int age = (level() != null && !level().isClientSide() && this.localAge >= 0)
+                ? this.localAge
+                : this.getEntityData().get(this.AGE);
+        return (double)age / (double)MAX_AGE;
     }
 
     @Override
     public void tick() {
-    	
-    	int age = this.getEntityData().get(AGE);
-        int decayRate = level().isRaining() && level().canSeeSky(blockPosition()) ? 3 : 1;
-        age -= decayRate;
-        if (age < 0) age = 0;
-
-    	this.getEntityData().set(AGE, age);
-        
-        if(!level().isClientSide() && age <= 0) {
-        	this.discard();
+        if (!level().isClientSide()) {
+            if (this.localAge < 0) {
+                this.localAge = this.getEntityData().get(AGE);
+            }
+            int decayRate = level().isRaining() && level().canSeeSky(blockPosition()) ? 3 : 1;
+            this.localAge = Math.max(0, this.localAge - decayRate);
+            // Throttle SynchedEntityData updates to every 20 ticks or on expiry instead of dirtying tracker every tick
+            if (this.localAge <= 0 || this.tickCount % 20 == 0) {
+                this.getEntityData().set(AGE, this.localAge);
+            }
+            if (this.localAge <= 0) {
+                this.discard();
+            }
+            return;
         }
 
         boolean scentDebug = ZAConfigClient.client_debugSensesVisual;
         if (scentDebug) {
-	        if (level().isClientSide()) {
-	        	if (level().getGameTime() % 5 == 0) {
-	        		for (int i = 0; i < getStrengthScaled() / 10; i++) {
-	        			double x = getX() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
-	        			double y = getY() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
-	        			double z = getZ() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
-	        			if (getSenseType() == 0) {
-	        				level().addParticle(ParticleTypes.HEART, true, true, x, y, z, 0, 0, 0);
-                        } else if (getSenseType() == 1) {
-                            level().addParticle(ParticleTypes.NOTE, true, true, x, y, z, 0, 0, 0);
-                        } else if (getSenseType() == 2) {
-                            level().addParticle(ParticleTypes.ANGRY_VILLAGER, true, true, x, y, z, 0, 0, 0);
-                        }
-	        		}
-	        	}
-	        }
+            if (level().getGameTime() % 5 == 0) {
+                for (int i = 0; i < getStrengthScaled() / 10; i++) {
+                    double x = getX() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
+                    double y = getY() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
+                    double z = getZ() - CU.rand().nextDouble() / 2 + CU.rand().nextDouble();
+                    if (getSenseType() == 0) {
+                        level().addParticle(ParticleTypes.HEART, true, true, x, y, z, 0, 0, 0);
+                    } else if (getSenseType() == 1) {
+                        level().addParticle(ParticleTypes.NOTE, true, true, x, y, z, 0, 0, 0);
+                    } else if (getSenseType() == 2) {
+                        level().addParticle(ParticleTypes.ANGRY_VILLAGER, true, true, x, y, z, 0, 0, 0);
+                    }
+                }
+            }
         }
     }
 
@@ -150,15 +157,18 @@ public class EntityScent extends Entity {
 
     @Override
     protected void addAdditionalSaveData(ValueOutput var1) {
-        var1.putInt("age", this.getEntityData().get(AGE));
+        int ageToSave = this.localAge >= 0 ? this.localAge : this.getEntityData().get(AGE);
+        var1.putInt("age", ageToSave);
         var1.putInt("strengthpeak", this.getEntityData().get(STRENGTH_PEAK));
         var1.putInt("type", getSenseType());
     }
 
     @Override
     protected void readAdditionalSaveData(ValueInput var1) {
-    	this.getEntityData().set(AGE, var1.getIntOr("age", 0));
-    	this.getEntityData().set(STRENGTH_PEAK, var1.getIntOr("strengthpeak", 0));
-    	this.getEntityData().set(TYPE, var1.getByteOr("type", (byte) 0));
+        int loadedAge = var1.getIntOr("age", 0);
+        this.localAge = loadedAge;
+        this.getEntityData().set(AGE, loadedAge);
+        this.getEntityData().set(STRENGTH_PEAK, var1.getIntOr("strengthpeak", 0));
+        this.getEntityData().set(TYPE, var1.getByteOr("type", (byte) 0));
     }
 }

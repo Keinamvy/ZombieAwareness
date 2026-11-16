@@ -60,13 +60,14 @@ public class ZAUtil {
     
     public static Random rand = new Random();
     
-    public static Map<String, Integer> lastHealths = new ConcurrentHashMap<>();
-    public static Map<String, Long> lastBleedTimes = new ConcurrentHashMap<>();
+    public static Map<UUID, Integer> lastHealths = new ConcurrentHashMap<>();
+    public static Map<UUID, Long> lastBleedTimes = new ConcurrentHashMap<>();
 
     public static List<SoundProfileEntry> listSoundProfiles = new CopyOnWriteArrayList<>();
 
 	//runtime cache lookups, populates as sounds are made, useful for partial matches that require iterating entire sound profile list each time
 	public static Map<String, SoundProfileEntry> lookupSoundNameToProfileCache = new ConcurrentHashMap<>();
+	private static final SoundProfileEntry NO_MATCH_SENTINEL = new SoundProfileEntry("__za_no_match__", 0.0D);
 	public static Map<Integer, SoundProfileEntry> lookupSoundIntToProfile = new ConcurrentHashMap<>();
 
     public static Map<Entity, Long> lookupLastAlertTime = Collections.synchronizedMap(new WeakHashMap<>());
@@ -75,7 +76,7 @@ public class ZAUtil {
     public static Map<Entity, Long> lookupLastInvestigateTime = Collections.synchronizedMap(new WeakHashMap<>());
     public static long investigateDelay = 60*20;
 
-	public static Map<String, Long> lookupLastWaypointTime = new ConcurrentHashMap<>();
+	public static Map<UUID, Long> lookupLastWaypointTime = new ConcurrentHashMap<>();
 
 	public static Map<EntityType, Boolean> lookupTickableEntitiesCache = new ConcurrentHashMap<>();
 
@@ -177,8 +178,12 @@ public class ZAUtil {
 	}
     
     public static SoundProfileEntry getSoundIDEntry(String sound) {
-		if (lookupSoundNameToProfileCache.containsKey(sound)) {
-			return lookupSoundNameToProfileCache.get(sound);
+		if (sound == null) {
+			return null;
+		}
+		SoundProfileEntry cached = lookupSoundNameToProfileCache.get(sound);
+		if (cached != null) {
+			return cached == NO_MATCH_SENTINEL ? null : cached;
 		}
     	for (SoundProfileEntry entry : listSoundProfiles) {
 
@@ -190,6 +195,7 @@ public class ZAUtil {
     			return entry;
     		}
     	}
+		lookupSoundNameToProfileCache.put(sound, NO_MATCH_SENTINEL);
     	return null;
     }
 	
@@ -265,27 +271,43 @@ public class ZAUtil {
         return true;
     }
 
+	public static void removePlayerTracking(UUID playerUuid) {
+		if (playerUuid == null) return;
+		lastHealths.remove(playerUuid);
+		lastBleedTimes.remove(playerUuid);
+		lookupLastWaypointTime.remove(playerUuid);
+		lastPortalLockdownMessageTick.remove(playerUuid);
+	}
+
+	public static void clearPlayerTracking() {
+		lastHealths.clear();
+		lastBleedTimes.clear();
+		lookupLastWaypointTime.clear();
+		lastPortalLockdownMessageTick.clear();
+	}
+
 	public static void tickPlayer(Player player) {
 		if (player instanceof ServerPlayer serverPlayer) {
 			checkPortalLockdown(serverPlayer);
 		}
-    	
+
+		UUID playerId = player.getUUID();
 		if (ZAConfigFeatures.wanderingHordes) {
 
-			long lastWaypoint = lookupLastWaypointTime.containsKey(CoroUtilEntity.getName(player)) ? lookupLastWaypointTime.get(CoroUtilEntity.getName(player)) : 0L;
+			Long lastWaypointVal = lookupLastWaypointTime.get(playerId);
+			long lastWaypoint = lastWaypointVal != null ? lastWaypointVal : 0L;
 			if (lastWaypoint < System.currentTimeMillis()) {
-				//System.out.println("lastWaypoint: " + lastWaypoint);
 				lastWaypoint = System.currentTimeMillis() + ZAConfigFeatures.frequencyOfWanderingHordesPerPlayer * 1000L;
-				lookupLastWaypointTime.put(CoroUtilEntity.getName(player), lastWaypoint);
-				//if (rand.nextInt(25) == 0) {
+				lookupLastWaypointTime.put(playerId, lastWaypoint);
 				spawnWaypoint(player);
-				//}
 			}
 		}
 
         if (ZAConfigFeatures.awareness_Scent && !player.isCreative()) {
-        	int lastHealth = lastHealths.containsKey(CoroUtilEntity.getName(player)) ? lastHealths.get(CoroUtilEntity.getName(player)) : 0;
-    		Long lastBleedTime = lastBleedTimes.containsKey(CoroUtilEntity.getName(player)) ? lastBleedTimes.get(CoroUtilEntity.getName(player)) : 0L;
+        	Integer lastHealthVal = lastHealths.get(playerId);
+        	int lastHealth = lastHealthVal != null ? lastHealthVal : 0;
+        	Long lastBleedVal = lastBleedTimes.get(playerId);
+    		long lastBleedTime = lastBleedVal != null ? lastBleedVal : 0L;
     		
     		Vector3d pos = new Vector3d(player.getX(), player.getY(), player.getZ());
     		
@@ -300,11 +322,11 @@ public class ZAUtil {
                 lastHealth = (int) player.getHealth();
             }
             
-            lastHealths.put(CoroUtilEntity.getName(player), lastHealth);
+            lastHealths.put(playerId, lastHealth);
 
             if(player.getHealth() / player.getMaxHealth() < 0.6F && lastBleedTime < System.currentTimeMillis()) {
                 lastBleedTime = System.currentTimeMillis() + 30000L;
-                lastBleedTimes.put(CoroUtilEntity.getName(player), lastBleedTime);
+                lastBleedTimes.put(playerId, lastBleedTime);
                 EntityScent scent = spawnOrBuffSenseAtPos(player.level(), pos, EnumSenseType.SCENT_BLOOD, ZAConfigGeneral.scentStrength);
                 if (scent != null) {
                 	ZombieAwareness.dbg("spawned or buffed scent sense from bleeding: " + scent.getStrengthPeak());
@@ -387,6 +409,17 @@ public class ZAUtil {
 
 	public static boolean hasHordeMobTag(Collection<String> tags) {
 		if (tags == null || tags.isEmpty()) {
+			return false;
+		}
+		if (tags.contains("za_horde_mob")) {
+			return true;
+		}
+		if (tags.size() < HORDE_MOB_TAGS.size()) {
+			for (String tag : tags) {
+				if (HORDE_MOB_TAGS.contains(tag)) {
+					return true;
+				}
+			}
 			return false;
 		}
 		for (String tag : HORDE_MOB_TAGS) {
@@ -486,7 +519,7 @@ public class ZAUtil {
 
     	if (ZAConfigGeneral.debugConsoleSuperDetailed) ZombieAwareness.dbg("ZA DBG: Ticking: " + ent);
 
-		long lastActionTime = ZombieAwareness.getPersistentDataSafe(ent).getLongOr(ZA_LAST_ACTION, 0L);
+		long lastActionTime = ZombieAwareness.getLastActionTick(ent);
 		if (lastActionTime > 0 && ent.level().getGameTime() - ZAConfigGeneral.tickCooldownBetweenPathfinds < lastActionTime) return;
 
 		//if (ent.getNoActionTime() <= 40) return;
@@ -554,67 +587,46 @@ public class ZAUtil {
     }
     
     public static boolean ai_FindLightSource(Mob ent) {
-    	
-    	if (ent.level().isBrightOutside()) return false;
+    	if (ent == null || ent.level().isBrightOutside()) return false;
 
 		boolean forceOn = false;
-    	
     	if (forceOn || CU.rand().nextInt(3) == 0) {
+    		Player entP = getClosestPlayerToEntity(ent.level(), ent, 999);
+    		if (entP == null || (!forceOn && ent.distanceToSqr(entP) <= 256.0D)) {
+    			return false;
+    		}
 
-			float lightValueAtEntity = ent.level().getBrightness(LightLayer.BLOCK, ent.blockPosition());
-
-    		Random rand = new Random();
-    		
-    		int size;
-    		
+    		Random rand = CU.rand();
+    		BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
     		for (int i = 0; i < 4; i++) {
-    			Player entP = getClosestPlayerToEntity(ent.level(), ent, 999);
-        		if (entP != null) {
+    			int size = 32 * (i + 1);
+	    		int rX = Mth.floor(entP.getX() + (rand.nextInt(size) - (size / 2)));
+	    		int rY = Mth.floor(entP.getY() + (rand.nextInt(Math.max(1, size / 2)) - (size / 4)));
+	    		int rZ = Mth.floor(entP.getZ() + (rand.nextInt(size) - (size / 2)));
 
-					//adjusted from 32 for 1.16 to get better results, vanilla might have changed something
-        			size = 32 * (i+1);
-        			//size = 12 * (i+1);
-        			//size = 4;
+	    		mutablePos.set(rX, rY, rZ);
+				if (!ent.level().isLoaded(mutablePos)) continue;
 
-		    		int rX = (int) Math.floor(entP.getX() + (rand.nextInt(size) - (size/2)));
-		    		int rY = (int) Math.floor(entP.getY() + (rand.nextInt(size/2) - (size/4)));
-		    		int rZ = (int) Math.floor(entP.getZ() + (rand.nextInt(size) - (size/2)));
-
-		    		BlockPos pos = new BlockPos(rX, rY, rZ);
-
-					if (!ent.level().isLoaded(pos)) continue;
-
-		    		float lightValue = entP.level().getBrightness(LightLayer.BLOCK, ent.blockPosition());
-
-					//as of 1.16 its float values for brightness, 0.2 seems like a good minimum brightness
-					//moon phases doesnt seem to affect this value
-
-		    		//if bright enough and also as bright or brighter than where they are currently
-		    		if (forceOn || lightValue > 0.2F/* && lightValue >= lightValueAtEntity*/) {
-						//adjusted to 32 from 64
-		    			if ((forceOn || CU.rand().nextInt(5) == 0) && ent.distanceTo(entP) > 16) {
-							boolean canSeePos = CoroUtilEntity.canSee(ent, new BlockPos(rX, rY, rZ));
-							if (canSeePos) {
-								ZombieAwareness.dbg("try path to light source - " + rX + ", " + rY + ", " + rZ);
-								//if (ent.getNavigation().moveTo(rX, rY, rZ, 1)) {
-								Profiler.get().push("zombieawareness_pathfind");
-								boolean pathFound = CoroUtilPath.tryMoveToXYZLongDist(ent, rX, rY, rZ, 1);
-								//pathFound = ent.getNavigation().moveTo(rX, rY, rZ, 1);
-								Profiler.get().pop();
-								if (pathFound) {
-									ZombieAwareness.dbg("node count: " + ent.getNavigation().getPath().getNodeCount());
-
-									ZombieAwareness.dbg("pathing to lightsource at " + rX + ", " + rY + ", " + rZ + " - " + ent);
-									markPerformedPathing(ent);
-								}
-								return true;
+	    		float lightValue = entP.level().getBrightness(LightLayer.BLOCK, mutablePos);
+	    		if (forceOn || lightValue > 0.2F) {
+	    			if (forceOn || CU.rand().nextInt(5) == 0) {
+						boolean canSeePos = CoroUtilEntity.canSee(ent, mutablePos);
+						if (canSeePos) {
+							ZombieAwareness.dbg("try path to light source - " + rX + ", " + rY + ", " + rZ);
+							Profiler.get().push("zombieawareness_pathfind");
+							boolean pathFound = CoroUtilPath.tryMoveToXYZLongDist(ent, rX, rY, rZ, 1);
+							Profiler.get().pop();
+							if (pathFound) {
+								ZombieAwareness.dbg("node count: " + ent.getNavigation().getPath().getNodeCount());
+								ZombieAwareness.dbg("pathing to lightsource at " + rX + ", " + rY + ", " + rZ + " - " + ent);
+								markPerformedPathing(ent);
 							}
-	    				}
-		    		}
-        		}
+							return true;
+						}
+    				}
+	    		}
     		}
     	}
-    	
     	return false;
     }
     
@@ -647,40 +659,34 @@ public class ZAUtil {
     }
     
     public static boolean ai_FindTarget(Mob ent, boolean omniscient) {
-    	long huntRange = ZAConfigGeneral.sightRange;
-    	
-    	if (omniscient) huntRange = 512;
-    	
+    	if (ent == null || ent.level() == null) return false;
+    	if (ent.getClass().getSimpleName().equals("EntityZombiePlayer")) {
+    		return false;
+    	}
+    	long huntRange = omniscient ? 512L : ZAConfigGeneral.sightRange;
+    	double maxRangeSq = (double) huntRange * (double) huntRange;
+    	double halfVertRange = huntRange * 0.5D;
+
     	if ((ent.getTarget() == null || CU.rand().nextInt(100) == 0)) {
-			boolean found = false;
-			Entity clEnt = null;
-			float closest = 9999F;
-	    	List list = ent.level().getEntities(ent, ent.getBoundingBox().inflate(huntRange, huntRange/2, huntRange));
-	        for(int j = 0; j < list.size(); j++)
-	        {
-	            Entity entity1 = (Entity)list.get(j);
-
-	            //for new calmed zombies, keep them from targetting/pathing towards player
-				//just blacklisting all of them from this feature, not checking if calm currently
-	            if (ent.getClass().getSimpleName().equals("EntityZombiePlayer")) {
-	            	continue;
+			Player clEnt = null;
+			double closestSq = Double.MAX_VALUE;
+			for (Player player : ent.level().players()) {
+				if (player == null || Math.abs(player.getY() - ent.getY()) > halfVertRange) {
+					continue;
 				}
-
-	            if(isEnemy(ent, entity1, omniscient))
-	            {
-	            	if (omniscient || (ZAConfigGeneral.seeThroughWalls || ((LivingEntity) entity1).hasLineOfSight(ent))) {
-	            		if (sanityCheck(ent, entity1)) {
-	            			float dist = (float) ent.distanceToSqr(entity1);
-	            			if (dist < closest) {
-	            				closest = dist;
-	            				clEnt = entity1;
-	            			}
-	            		}
-	            	}
-	            }
-	        }
+				double distSq = ent.distanceToSqr(player);
+				if (distSq > maxRangeSq || distSq >= closestSq) {
+					continue;
+				}
+				if (isEnemy(ent, player, omniscient)
+						&& (omniscient || ZAConfigGeneral.seeThroughWalls || player.hasLineOfSight(ent))
+						&& sanityCheck(ent, player)) {
+					closestSq = distSq;
+					clEnt = player;
+				}
+			}
 	        if (clEnt != null) {
-	        	huntTarget(ent, (LivingEntity)clEnt);
+	        	huntTarget(ent, clEnt);
 				markPerformedPathing(ent);
 				ZombieAwareness.dbg(" hunting target " + ent + " " + clEnt);
 	        	return true;
@@ -771,10 +777,7 @@ public class ZAUtil {
 	}
 
 	public static void hookSoundEventClient(SoundEvent sound, Level world, double x, double y, double z, float volume, float pitch) {
-		Player closestPlayer = getClosestPlayer(world, x, y, z, 5);
-		if (closestPlayer != null) {
-			System.out.println("client sound heard: " + SoundProfileEntry.getSoundEventName(sound));
-		}
+		// Debug client sound logging disabled for production performance
 	}
 
     public static void hookSoundEvent(SoundEvent sound, Level world, double x, double y, double z, float volume, float pitch) {
@@ -871,10 +874,6 @@ public class ZAUtil {
 		}
 	}
 
-	public static void test(Object... args) {
-		//System.out.println("can attack? " );
-	}
-    
     public static void hookSetAttackTarget(LivingEntity entity, LivingEntity target) {
     	//ZombieAwareness.dbg(event.getEntityLiving().getEntityId() + " targetting " + event.getTarget());
     	

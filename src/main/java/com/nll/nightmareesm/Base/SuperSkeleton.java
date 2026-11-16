@@ -5,6 +5,10 @@ import net.minecraft.world.entity.monster.Monster;
 
 public class SuperSkeleton {
    public SuperSkeleton(Monster M) {
-      new MobBloodlust(M);
+      apply(M);
+   }
+
+   public static void apply(Monster M) {
+      MobBloodlust.apply(M);
    }
 }
