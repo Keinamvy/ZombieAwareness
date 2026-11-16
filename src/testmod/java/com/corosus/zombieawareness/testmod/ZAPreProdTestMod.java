@@ -107,29 +107,31 @@ public class ZAPreProdTestMod implements ModInitializer {
             LOGGER.info("[Test 2/10] PASS: All config files verified loaded on server.");
 
             // Test 3/10: Empty-server clock freeze & 10-Stage unlock schedule
-            LOGGER.info("[Test 3/10] Verifying empty-server clock freeze & 10-stage unlock schedule (Days 1..30)...");
+            LOGGER.info("[Test 3/10] Verifying empty-server clock freeze & 10-stage unlock schedule (Days 1..100)...");
             long activeTicks = ZDayProgressionManager.getActivePlayTicks();
             assertCondition(activeTicks == 0L, "Expected activePlayTicks == 0 when 0 players have logged in, got " + activeTicks);
             assertCondition(ZDayProgressionManager.advanceTickLogic(0L, 100L, 101L, 0) == 0L, "advanceTickLogic must freeze active ticks at 0 players");
             assertCondition(ZDayProgressionManager.advanceTickLogic(0L, 100L, 101L, 1) == 1L, "advanceTickLogic must advance ticks when 1 player online");
 
             assertCondition(ZDayStage.getStageForDay(1).getStageNumber() == 1, "Day 1 must be Stage 1");
-            assertCondition(ZDayStage.getStageForDay(4).getStageNumber() == 2, "Day 4 must be Stage 2");
-            assertCondition(ZDayStage.getStageForDay(6).getStageNumber() == 3, "Day 6 must be Stage 3");
-            assertCondition(ZDayStage.getStageForDay(8).getStageNumber() == 4, "Day 8 must be Stage 4");
-            assertCondition(ZDayStage.getStageForDay(11).getStageNumber() == 5, "Day 11 must be Stage 5");
-            assertCondition(ZDayStage.getStageForDay(14).getStageNumber() == 6, "Day 14 must be Stage 6");
-            assertCondition(ZDayStage.getStageForDay(18).getStageNumber() == 7, "Day 18 must be Stage 7");
-            assertCondition(ZDayStage.getStageForDay(22).getStageNumber() == 8, "Day 22 must be Stage 8");
-            assertCondition(ZDayStage.getStageForDay(26).getStageNumber() == 9, "Day 26 must be Stage 9");
-            assertCondition(ZDayStage.getStageForDay(30).getStageNumber() == 10, "Day 30 must be Stage 10");
-            assertCondition(ZDayStage.getStageForDay(100).getStageNumber() == 10, "Day 100 must remain Stage 10");
+            assertCondition(ZDayStage.getStageForDay(20).getStageNumber() == 1, "Day 20 must remain Stage 1");
+            assertCondition(ZDayStage.getStageForDay(21).getStageNumber() == 2, "Day 21 must be Stage 2");
+            assertCondition(ZDayStage.getStageForDay(40).getStageNumber() == 2, "Day 40 must remain Stage 2");
+            assertCondition(ZDayStage.getStageForDay(41).getStageNumber() == 3, "Day 41 must be Stage 3");
+            assertCondition(ZDayStage.getStageForDay(49).getStageNumber() == 4, "Day 49 must be Stage 4");
+            assertCondition(ZDayStage.getStageForDay(57).getStageNumber() == 5, "Day 57 must be Stage 5");
+            assertCondition(ZDayStage.getStageForDay(65).getStageNumber() == 6, "Day 65 must be Stage 6");
+            assertCondition(ZDayStage.getStageForDay(73).getStageNumber() == 7, "Day 73 must be Stage 7");
+            assertCondition(ZDayStage.getStageForDay(82).getStageNumber() == 8, "Day 82 must be Stage 8");
+            assertCondition(ZDayStage.getStageForDay(91).getStageNumber() == 9, "Day 91 must be Stage 9");
+            assertCondition(ZDayStage.getStageForDay(100).getStageNumber() == 10, "Day 100 must be Stage 10");
+            assertCondition(ZDayStage.getStageForDay(150).getStageNumber() == 10, "Day 150 must remain Stage 10");
             passed++;
             LOGGER.info("[Test 3/10] PASS: Clock freeze and all 10 escalation stages verified.");
 
             // Test 4/10: Multiplayer offline player catch-up dossier & /zday status + /zday log commands
             LOGGER.info("[Test 4/10] Verifying offline player catch-up dossier and /zday command execution...");
-            ZDayProgressionManager.setForcedWorldDay(11);
+            ZDayProgressionManager.setForcedWorldDay(57);
             UUID offlinePlayerUuid = UUID.randomUUID();
             List<String> dossier = ZDayProgressionManager.buildCatchUpReportLines(offlinePlayerUuid);
             assertCondition(dossier.size() > 1, "Expected multi-line catch-up briefing");
@@ -150,7 +152,7 @@ public class ZAPreProdTestMod implements ModInitializer {
             // Test 5/10: TaCZ Gunshot heat, 1-Horde-Per-Group limit, Post-Horde Breather & 4-Phase System
             LOGGER.info("[Test 5/10] Verifying TaCZ gunfire heat, 1-Horde-Per-Group limit, Post-Horde Breather, and 4-phase duration...");
             ChunkHeatManager.clearAllHeat();
-            ZDayProgressionManager.setForcedWorldDay(4); // Stage 2 (Day 4+) required for heat trigger
+            ZDayProgressionManager.setForcedWorldDay(21); // Stage 2 (Day 21+) required for heat trigger
 
             boolean isDay = ChunkHeatManager.isDaytime(level);
             int silencedUnit = ChunkHeatManager.computeGunfireHeatAmount(isDay, true);
@@ -260,8 +262,8 @@ public class ZAPreProdTestMod implements ModInitializer {
 
             // Test 6/10: Bloodmoon schedule, forced Bloodmoon activation & reset
             LOGGER.info("[Test 6/10] Verifying Bloodmoon schedule, forced activation, and reset...");
-            assertCondition(BloodmoonManager.isBloodmoonDay(8), "Day 8 must be Bloodmoon day");
-            assertCondition(!BloodmoonManager.isBloodmoonDay(7), "Day 7 must not be Bloodmoon day");
+            assertCondition(BloodmoonManager.isBloodmoonDay(49), "Day 49 must be Bloodmoon day");
+            assertCondition(!BloodmoonManager.isBloodmoonDay(48), "Day 48 must not be Bloodmoon day");
             assertCondition(BloodmoonManager.isBloodmoonNightTime(18000L), "Tick 18000 must be night");
             assertCondition(!BloodmoonManager.isBloodmoonNightTime(6000L), "Tick 6000 must not be night");
 

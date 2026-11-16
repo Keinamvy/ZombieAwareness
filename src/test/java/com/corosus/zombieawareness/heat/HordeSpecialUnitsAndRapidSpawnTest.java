@@ -3,6 +3,7 @@ package com.corosus.zombieawareness.heat;
 import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.config.ZAConfigZDay;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -224,5 +225,104 @@ public class HordeSpecialUnitsAndRapidSpawnTest {
         assertFalse(HordeSpecialUnitHelper.isTaczTurretEntity(null));
         assertTrue(HordeSpecialUnitHelper.isTaczTurretEntityTypeId("tacz_turrets", "turret"),
                 "Turret ID helper remains functional regardless of FabricLoader mod-loaded short-circuit");
+    }
+
+    @Test
+    void engineerLoadoutTagsIndicatorAndJuggernautThrowerPriorityAndSapperFuse() {
+        // 1. Siege Engineer constants & indicator
+        assertEquals("za_engineer", HordeSpecialUnitHelper.ENGINEER_TAG);
+        assertEquals("§3§l[ENGINEER]", HordeSpecialUnitHelper.resolveSpecialIndicatorLabel(
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.ENGINEER_TAG)));
+        assertEquals(1.05D, HordeSpecialUnitHelper.resolveSpecialIndicatorScale(
+                Set.of(HordeSpecialUnitHelper.ENGINEER_TAG)), 1e-6);
+
+        // 2. Thrower Juggernaut config & target range selection (turret priority over player)
+        assertEquals(200, ZAConfigZDay.juggernautThrowIntervalTicks);
+        assertEquals(8.0, ZAConfigZDay.juggernautThrowMinRange, 1e-6);
+        assertEquals(28.0, ZAConfigZDay.juggernautThrowMaxRange, 1e-6);
+        assertEquals(50, ZAConfigZDay.thrownSapperFuseTicks);
+
+        double[] tx = { 5.0, 22.0, 14.0 };
+        double[] ty = { 64.0, 64.0, 64.0 };
+        double[] tz = { 0.0, 0.0, 0.0 };
+        boolean[] enabled = { true, true, false };
+        // Index 0 is < 8m minRange, index 2 is disabled -> index 1 (22m) wins
+        assertEquals(1, HordeSpecialUnitHelper.selectThrowerTurretIndex(
+                0.0, 64.0, 0.0, tx, ty, tz, enabled, 8.0, 28.0));
+
+        // Elevated player at 4m (< 8m horiz, +2m Y) is eligible fallback
+        double[] px = { 4.0, 15.0 };
+        double[] py = { 66.0, 64.0 };
+        double[] pz = { 0.0, 0.0 };
+        boolean[] eligible = { true, true };
+        assertEquals(0, HordeSpecialUnitHelper.selectThrowerPlayerIndex(
+                0.0, 64.0, 0.0, px, py, pz, eligible, 8.0, 28.0));
+
+        // 3. Ballistic throw velocity
+        Vec3 vel = HordeSpecialUnitHelper.computeBallisticThrowVelocity(
+                new Vec3(0.0, 64.0, 0.0), new Vec3(20.0, 68.0, 0.0));
+        assertTrue(vel.x > 0.0 && vel.y >= 0.42 && Math.abs(vel.z) < 1e-6,
+                "Throw velocity must propel toward target with upward arc: " + vel);
+
+        // 4. Plain horde zombie ammo conversion rules
+        assertTrue(HordeSpecialUnitHelper.canBeConvertedToThrowAmmo(Set.of("za_horde_mob")));
+        assertFalse(HordeSpecialUnitHelper.canBeConvertedToThrowAmmo(Set.of("za_horde_mob", "za_tanker")));
+        assertFalse(HordeSpecialUnitHelper.canBeConvertedToThrowAmmo(Set.of("za_horde_mob", "za_engineer")));
+        assertFalse(HordeSpecialUnitHelper.canBeConvertedToThrowAmmo(Set.of("za_horde_mob", "za_juggernaut")));
+        assertFalse(HordeSpecialUnitHelper.canBeConvertedToThrowAmmo(Set.of("za_horde_mob", "za_knight")));
+
+        // 5. Thrown Sapper 50-tick landing fuse
+        HordeSpecialUnitHelper.ThrownSapperFuseState fuse = new HordeSpecialUnitHelper.ThrownSapperFuseState(50);
+        for (int t = 0; t < 5; t++) {
+            assertFalse(HordeSpecialUnitHelper.stepThrownSapperFuse(fuse, false), "Airborne ticks must not start fuse early");
+        }
+        assertFalse(fuse.landed);
+        // Landing tick triggers tick #1 of 50
+        for (int t = 1; t < 50; t++) {
+            assertFalse(HordeSpecialUnitHelper.stepThrownSapperFuse(fuse, true), "Sapper must not detonate before 50 landed ticks (tick " + t + ")");
+        }
+        assertTrue(fuse.landed);
+        assertTrue(HordeSpecialUnitHelper.stepThrownSapperFuse(fuse, true), "Sapper must detonate on tick 50 after landing");
+    }
+
+    @Test
+    void earlyStageEliteSpawnMultiplierAndStageUnlockGatesThrottleStagesOneThroughEight() {
+        assertEquals(0.0D, ChunkHeatManager.computeStageEliteSpawnMultiplier(1), 1e-6);
+        assertEquals(0.15D, ChunkHeatManager.computeStageEliteSpawnMultiplier(2), 1e-6);
+        assertEquals(0.30D, ChunkHeatManager.computeStageEliteSpawnMultiplier(3), 1e-6);
+        assertEquals(0.40D, ChunkHeatManager.computeStageEliteSpawnMultiplier(4), 1e-6);
+        assertEquals(0.55D, ChunkHeatManager.computeStageEliteSpawnMultiplier(5), 1e-6);
+        assertEquals(0.70D, ChunkHeatManager.computeStageEliteSpawnMultiplier(6), 1e-6);
+        assertEquals(0.80D, ChunkHeatManager.computeStageEliteSpawnMultiplier(7), 1e-6);
+        assertEquals(0.90D, ChunkHeatManager.computeStageEliteSpawnMultiplier(8), 1e-6);
+        assertEquals(1.0D, ChunkHeatManager.computeStageEliteSpawnMultiplier(9), 1e-6);
+        assertEquals(1.0D, ChunkHeatManager.computeStageEliteSpawnMultiplier(10), 1e-6);
+
+        // Stage 1: zero elites
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.TANKER_TAG, 1));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.CRAWLER_TAG, 1));
+        assertEquals(0.0D, ChunkHeatManager.computeScaledEliteChance(0.20D, HordeSpecialUnitHelper.TANKER_TAG, 1), 1e-6);
+
+        // Stage 2: rare Tanker/Crawler only; Engineers/Knights/Screamers/Juggernauts/Sappers locked
+        assertTrue(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.TANKER_TAG, 2));
+        assertTrue(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.CRAWLER_TAG, 2));
+        assertEquals(0.0225D, ChunkHeatManager.computeScaledEliteChance(0.15D, HordeSpecialUnitHelper.TANKER_TAG, 2), 1e-6);
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.ENGINEER_TAG, 2));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.KNIGHT_TAG, 2));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage("za_screamer", 2));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.JUGGERNAUT_TAG, 2));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.SAPPER_TAG, 2));
+
+        // Progressive unlocks across Stages 3-8
+        assertTrue(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.ENGINEER_TAG, 3));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.KNIGHT_TAG, 4));
+        assertTrue(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.KNIGHT_TAG, 5));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage("za_screamer", 5));
+        assertTrue(ChunkHeatManager.canSpawnEliteInStage("za_screamer", 6));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.JUGGERNAUT_TAG, 6));
+        assertTrue(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.JUGGERNAUT_TAG, 7));
+        assertFalse(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.SAPPER_TAG, 7));
+        assertTrue(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.SAPPER_TAG, 8));
+        assertEquals(0.14D, ChunkHeatManager.computeScaledEliteChance(0.14D, HordeSpecialUnitHelper.SAPPER_TAG, 10), 1e-6);
     }
 }

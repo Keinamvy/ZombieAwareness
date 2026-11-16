@@ -53,51 +53,56 @@ public class HordeCapAndDamageCloneTest {
         assertEquals(48, ZAConfigZDay.mobDamageCloneMaxNearby);
         assertEquals("za_damage_clone", ZAUtil.DAMAGE_CLONE_TAG);
 
-        // Eligible hostile mob damaged by combat attacker with roll < 0.08 triggers cloning
+        // Eligible horde hostile mob damaged by combat attacker with roll < 0.08 triggers cloning
         assertTrue(ZAUtil.canTriggerDamageClone(
-                true, true, false, true, 5.0f,
+                true, true, true, false, true, 5.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.05));
+
+        // Non-horde wild mobs must never trigger damage cloning
+        assertFalse(ZAUtil.canTriggerDamageClone(
+                false, true, true, false, true, 5.0f,
+                -1L, 500L, 200L, 10, 48, 0.08, 0.01));
 
         // Roll >= chance does not trigger
         assertFalse(ZAUtil.canTriggerDamageClone(
-                true, true, false, true, 5.0f,
+                true, true, true, false, true, 5.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.08));
         assertFalse(ZAUtil.canTriggerDamageClone(
-                true, true, false, true, 5.0f,
+                true, true, true, false, true, 5.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.50));
 
         // Environmental damage (no attacker entity) must not trigger clones
         assertFalse(ZAUtil.canTriggerDamageClone(
-                true, true, false, false, 5.0f,
+                true, true, true, false, false, 5.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.01));
 
         // Already-cloned mobs (za_damage_clone) must never clone recursively
         assertFalse(ZAUtil.canTriggerDamageClone(
-                true, true, true, true, 5.0f,
+                true, true, true, true, true, 5.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.01));
 
         // Cooldown prevents repeated triggers until cooldownTicks elapses
         assertFalse(ZAUtil.canTriggerDamageClone(
-                true, true, false, true, 5.0f,
+                true, true, true, false, true, 5.0f,
                 400L, 550L, 200L, 10, 48, 0.08, 0.01));
         assertTrue(ZAUtil.canTriggerDamageClone(
-                true, true, false, true, 5.0f,
+                true, true, true, false, true, 5.0f,
                 400L, 600L, 200L, 10, 48, 0.08, 0.01));
 
         // Nearby hostile density cap stops further cloning
         assertFalse(ZAUtil.canTriggerDamageClone(
-                true, true, false, true, 5.0f,
+                true, true, true, false, true, 5.0f,
                 -1L, 500L, 200L, 48, 48, 0.08, 0.01));
 
         // Non-hostile, dead, or zero-damage hits are rejected
         assertFalse(ZAUtil.canTriggerDamageClone(
-                false, true, false, true, 5.0f,
+                true, false, true, false, true, 5.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.01));
         assertFalse(ZAUtil.canTriggerDamageClone(
-                true, false, false, true, 5.0f,
+                true, true, false, false, true, 5.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.01));
         assertFalse(ZAUtil.canTriggerDamageClone(
-                true, true, false, true, 0.0f,
+                true, true, true, false, true, 0.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.01));
     }
 }

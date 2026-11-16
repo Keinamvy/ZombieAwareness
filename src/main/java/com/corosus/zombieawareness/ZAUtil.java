@@ -10,15 +10,21 @@ import com.corosus.zombieawareness.config.ZAConfigZDay;
 import com.corosus.zombieawareness.heat.ChunkHeatManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.util.Mth;
 import net.minecraft.util.profiling.Profiler;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.damagesource.DamageTypes;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
@@ -37,7 +43,9 @@ import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.entity.npc.Npc;
 import net.minecraft.world.entity.npc.villager.AbstractVillager;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.ButtonBlock;
@@ -55,6 +63,7 @@ import org.joml.Vector3d;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class ZAUtil {
     
@@ -87,12 +96,33 @@ public class ZAUtil {
     public static final float NECROTIC_REGEN_EFFICIENCY = 0.50f; // Reduces healing/regeneration efficiency by 50%
     public static final long NECROTIC_TRAUMA_DURATION_TICKS = 160L; // 8 seconds
     public static final float HORDE_MOB_LOOT_DROP_CHANCE = 0.20f; // Only 20% of horde mobs drop loot (80% drop reduction)
+    public static final double DAMAGE_CLONE_LOOT_MULTIPLIER = 0.25D; // Clones drop at 25% of a normal mob's drop rate
+    public static final double NORMAL_HORDE_GUNPOWDER_DROP_CHANCE = 0.50D; // 50% chance for normal horde mobs to drop 1-3 gunpowder
     public static final String DAMAGE_CLONE_TAG = "za_damage_clone";
+
+    public static final long ONE_HEART_CLUTCH_COOLDOWN_TICKS = 6000L; // 5 minutes
+    public static final double ONE_HEART_CLUTCH_CHANCE = 0.25D;
+    public static final float ONE_HEART_CLUTCH_HEALTH = 2.0F; // 1 heart
+    public static final long ONE_HEART_CLUTCH_INVUL_TICKS = 40L; // 2.0s post-clutch immunity
+    public static final int ADRENALINE_SURGE_DURATION_TICKS = 240; // 12 seconds
+    public static final float ADRENALINE_LIFE_ON_KILL_HEAL = 2.0F; // +1 heart
+    public static final List<String> CLUTCH_EPILOGUE_LINES = List.of(
+            "Not here... not like this.",
+            "Just one more breath...",
+            "I can't fall yet...",
+            "Vision's fading... push through!"
+    );
 
     private static long lastDistressScentTick = -9999L;
 
     private static final Map<UUID, Long> necroticTraumaUntilTick = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> lastDamageCloneTickMap = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> lastOneHeartClutchTickMap = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> adrenalineActiveUntilTickMap = new ConcurrentHashMap<>();
+
+    public static final long ELITE_DIAMOND_WINDOW_TICKS = 6000L; // 5 minutes
+    private static final Object ELITE_DIAMOND_LOCK = new Object();
+    private static final ArrayDeque<Long> recentBonusDiamondTicks = new ArrayDeque<>();
 
     public static boolean debug = false;
     
@@ -277,6 +307,9 @@ public class ZAUtil {
 		lastBleedTimes.remove(playerUuid);
 		lookupLastWaypointTime.remove(playerUuid);
 		lastPortalLockdownMessageTick.remove(playerUuid);
+		necroticTraumaUntilTick.remove(playerUuid);
+		lastOneHeartClutchTickMap.remove(playerUuid);
+		adrenalineActiveUntilTickMap.remove(playerUuid);
 	}
 
 	public static void clearPlayerTracking() {
@@ -284,6 +317,9 @@ public class ZAUtil {
 		lastBleedTimes.clear();
 		lookupLastWaypointTime.clear();
 		lastPortalLockdownMessageTick.clear();
+		clearNecroticTrauma();
+		resetAdrenalineState();
+		resetEliteLootWindowState();
 	}
 
 	public static void tickPlayer(Player player) {
@@ -391,6 +427,9 @@ public class ZAUtil {
 	public static final String KNIGHT_MOUNT_TAG = "za_knight_mount";
 	public static final String RAMPAGE_TAG = "za_rampage";
 	public static final String LABELED_MOB_TAG = "za_labeled_mob";
+	public static final String ENGINEER_TAG = "za_engineer";
+	public static final String THROWN_PROJECTILE_TAG = "za_thrown_projectile";
+	public static final String THROWN_LANDED_TAG = "za_thrown_landed";
 
 	private static final Set<String> HORDE_MOB_TAGS = Set.of(
 			"za_horde_mob",
@@ -400,12 +439,43 @@ public class ZAUtil {
 			"za_apex_corrosive",
 			"za_screamer",
 			"za_airdrop_passenger",
+			ENGINEER_TAG,
 			TANKER_TAG,
 			BLOODMOON_WARDEN_TAG,
 			KNIGHT_TAG,
 			KNIGHT_MOUNT_TAG,
 			RAMPAGE_TAG
 	);
+
+	private static final Set<String> ELITE_HORDE_TAGS = Set.of(
+			TANKER_TAG,
+			KNIGHT_TAG,
+			"za_juggernaut",
+			ENGINEER_TAG,
+			"za_tnt_sapper",
+			"za_screamer",
+			BLOODMOON_WARDEN_TAG
+	);
+
+	private static boolean hasAnyTag(Collection<String> tags, Set<String> targetSet) {
+		if (tags == null || tags.isEmpty()) {
+			return false;
+		}
+		if (tags.size() < targetSet.size()) {
+			for (String tag : tags) {
+				if (targetSet.contains(tag)) {
+					return true;
+				}
+			}
+			return false;
+		}
+		for (String tag : targetSet) {
+			if (tags.contains(tag)) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	public static boolean hasHordeMobTag(Collection<String> tags) {
 		if (tags == null || tags.isEmpty()) {
@@ -414,24 +484,19 @@ public class ZAUtil {
 		if (tags.contains("za_horde_mob")) {
 			return true;
 		}
-		if (tags.size() < HORDE_MOB_TAGS.size()) {
-			for (String tag : tags) {
-				if (HORDE_MOB_TAGS.contains(tag)) {
-					return true;
-				}
-			}
-			return false;
-		}
-		for (String tag : HORDE_MOB_TAGS) {
-			if (tags.contains(tag)) {
-				return true;
-			}
-		}
-		return false;
+		return hasAnyTag(tags, HORDE_MOB_TAGS);
 	}
 
 	public static boolean isHordeMob(Entity entity) {
 		return entity != null && hasHordeMobTag(entity.entityTags());
+	}
+
+	public static boolean hasEliteHordeTag(Collection<String> tags) {
+		return hasAnyTag(tags, ELITE_HORDE_TAGS);
+	}
+
+	public static boolean isEliteHordeMob(Entity entity) {
+		return entity != null && hasEliteHordeTag(entity.entityTags());
 	}
 
 	public static boolean isVillagerEntity(Entity entity) {
@@ -1201,11 +1266,420 @@ public class ZAUtil {
         return scent;
     }
 
+    public static double computeLootDropRate(boolean isHorde, boolean isElite, boolean isDamageClone) {
+        if (isDamageClone) {
+            return DAMAGE_CLONE_LOOT_MULTIPLIER;
+        }
+        if (isElite) {
+            return 1.0D;
+        }
+        return isHorde ? HORDE_MOB_LOOT_DROP_CHANCE : 1.0D;
+    }
+
     public static boolean shouldHordeMobDropLoot(boolean isHordeMob, float randomZeroToOne) {
-        if (!isHordeMob) {
+        return shouldHordeMobDropLoot(isHordeMob, false, false, randomZeroToOne);
+    }
+
+    public static boolean shouldHordeMobDropLoot(boolean isHordeMob, boolean isEliteHordeMob, float randomZeroToOne) {
+        return shouldHordeMobDropLoot(isHordeMob, isEliteHordeMob, false, randomZeroToOne);
+    }
+
+    public static boolean shouldHordeMobDropLoot(
+            boolean isHordeMob,
+            boolean isEliteHordeMob,
+            boolean isDamageClone,
+            float randomZeroToOne) {
+        double rate = computeLootDropRate(isHordeMob, isEliteHordeMob, isDamageClone);
+        if (rate >= 1.0D) {
             return true;
         }
-        return randomZeroToOne < HORDE_MOB_LOOT_DROP_CHANCE;
+        return randomZeroToOne < rate;
+    }
+
+    public static void resetAdrenalineState() {
+        lastOneHeartClutchTickMap.clear();
+        adrenalineActiveUntilTickMap.clear();
+    }
+
+    public static boolean isClutchBypassDamage(DamageSource source) {
+        if (source == null) {
+            return false;
+        }
+        return source.is(DamageTypes.GENERIC_KILL)
+                || source.is(DamageTypes.FELL_OUT_OF_WORLD)
+                || source.is(DamageTypeTags.BYPASSES_INVULNERABILITY);
+    }
+
+    /**
+     * Pure eligibility check for the 1-Heart Clutch protagonist save (<= 1 heart remaining, 5-min cooldown, 25% chance).
+     */
+    public static boolean canTriggerOneHeartClutch(
+            boolean isAlive,
+            boolean isCreativeOrSpectator,
+            boolean bypassesClutch,
+            float currentHealth,
+            float damageAmount,
+            long lastClutchTick,
+            long gameTime,
+            double randomZeroToOne) {
+        if (!isAlive || isCreativeOrSpectator || bypassesClutch || damageAmount <= 0.0F) {
+            return false;
+        }
+        if ((currentHealth - damageAmount) > ONE_HEART_CLUTCH_HEALTH) {
+            return false;
+        }
+        if (lastClutchTick >= 0L && gameTime >= lastClutchTick && (gameTime - lastClutchTick) < ONE_HEART_CLUTCH_COOLDOWN_TICKS) {
+            return false;
+        }
+        return randomZeroToOne < ONE_HEART_CLUTCH_CHANCE;
+    }
+
+    public static boolean hasActiveAdrenaline(UUID playerUuid, long gameTime) {
+        return playerUuid != null && adrenalineActiveUntilTickMap.getOrDefault(playerUuid, Long.MIN_VALUE) > gameTime;
+    }
+
+    public static long getLastClutchTick(UUID playerUuid) {
+        return playerUuid != null ? lastOneHeartClutchTickMap.getOrDefault(playerUuid, Long.MIN_VALUE) : Long.MIN_VALUE;
+    }
+
+    public static void recordClutchAndAdrenaline(UUID playerUuid, long gameTime) {
+        if (playerUuid == null) {
+            return;
+        }
+        if (lastOneHeartClutchTickMap.size() > 4096) {
+            lastOneHeartClutchTickMap.entrySet().removeIf(e -> (gameTime - e.getValue()) > ONE_HEART_CLUTCH_COOLDOWN_TICKS);
+        }
+        if (adrenalineActiveUntilTickMap.size() > 4096) {
+            adrenalineActiveUntilTickMap.entrySet().removeIf(e -> e.getValue() <= gameTime);
+        }
+        lastOneHeartClutchTickMap.put(playerUuid, gameTime);
+        adrenalineActiveUntilTickMap.put(playerUuid, gameTime + ADRENALINE_SURGE_DURATION_TICKS);
+    }
+
+    public static float computeAdrenalineKillHeal(boolean isHostileOrHordeMob, boolean killerHasActiveAdrenaline) {
+        return (isHostileOrHordeMob && killerHasActiveAdrenaline) ? ADRENALINE_LIFE_ON_KILL_HEAL : 0.0F;
+    }
+
+    /**
+     * Triggers the 1-Heart Clutch epilogue and 12s Adrenaline Surge for a ServerPlayer about to drop to <= 1 heart.
+     */
+    public static boolean tryTriggerOneHeartClutch(ServerPlayer player, float damageAmount, DamageSource source, long gameTime) {
+        if (player == null || !(player.level() instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+        if (player.isInvulnerableTo(serverLevel, source)) {
+            return false;
+        }
+        long lastClutchTick = getLastClutchTick(player.getUUID());
+        boolean triggered = canTriggerOneHeartClutch(
+                player.isAlive() && !player.isDeadOrDying(),
+                player.isCreative() || player.isSpectator(),
+                isClutchBypassDamage(source),
+                player.getHealth(),
+                damageAmount,
+                lastClutchTick,
+                gameTime,
+                ThreadLocalRandom.current().nextDouble()
+        );
+        if (!triggered) {
+            return false;
+        }
+
+        recordClutchAndAdrenaline(player.getUUID(), gameTime);
+        player.setHealth(ONE_HEART_CLUTCH_HEALTH);
+
+        player.addEffect(new MobEffectInstance(MobEffects.SPEED, ADRENALINE_SURGE_DURATION_TICKS, 1));
+        player.addEffect(new MobEffectInstance(MobEffects.HASTE, ADRENALINE_SURGE_DURATION_TICKS, 1));
+        player.addEffect(new MobEffectInstance(MobEffects.STRENGTH, ADRENALINE_SURGE_DURATION_TICKS, 0));
+
+        serverLevel.playSound(null, player.getX(), player.getY(), player.getZ(),
+                SoundEvents.WARDEN_HEARTBEAT, SoundSource.PLAYERS, 1.5F, 0.9F);
+        serverLevel.playSound(null, player.getX(), player.getY(), player.getZ(),
+                SoundEvents.TOTEM_USE, SoundSource.PLAYERS, 0.9F, 1.15F);
+
+        String line = CLUTCH_EPILOGUE_LINES.get(ThreadLocalRandom.current().nextInt(CLUTCH_EPILOGUE_LINES.size()));
+        Component epilogue = Component.literal("§c§o" + line);
+        player.sendSystemMessage(epilogue, true);
+        if (player.connection != null) {
+            player.connection.send(new ClientboundSetTitlesAnimationPacket(5, 50, 15));
+            player.connection.send(new ClientboundSetTitleTextPacket(Component.empty()));
+            player.connection.send(new ClientboundSetSubtitleTextPacket(epilogue));
+        }
+        return true;
+    }
+
+    public static float tryApplyAdrenalineLifeOnKill(ServerLevel level, LivingEntity deadEntity, DamageSource source) {
+        if (level == null || deadEntity == null || source == null) {
+            return 0.0F;
+        }
+        if (!(source.getEntity() instanceof ServerPlayer killer) || !killer.isAlive()) {
+            return 0.0F;
+        }
+        boolean targetValid = isHostileMob(deadEntity) || isHordeMob(deadEntity);
+        float heal = computeAdrenalineKillHeal(targetValid, hasActiveAdrenaline(killer.getUUID(), level.getGameTime()));
+        if (heal <= 0.0F) {
+            return 0.0F;
+        }
+        killer.heal(heal);
+        level.playSound(null, killer.getX(), killer.getY(), killer.getZ(),
+                SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.PLAYERS, 0.7F, 1.35F);
+        level.playSound(null, killer.getX(), killer.getY(), killer.getZ(),
+                SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.45F, 1.25F);
+        return heal;
+    }
+
+    public record EliteDropSpec(String itemId, int minCount, int maxCount, double chance) {}
+
+    public record EliteDropRoll(String itemId, int count) {}
+
+    public enum EliteLootTier {
+        SPECIALIST,
+        HEAVY,
+        JUGGERNAUT,
+        WARDEN
+    }
+
+    private static final List<EliteDropSpec> SPECIALIST_ELITE_DROPS = List.of(
+            new EliteDropSpec("minecraft:iron_ingot", 2, 4, 1.0D),
+            new EliteDropSpec("minecraft:copper_ingot", 2, 4, 1.0D),
+            new EliteDropSpec("minecraft:gunpowder", 2, 4, 1.0D),
+            new EliteDropSpec("minecraft:coal", 2, 5, 1.0D),
+            new EliteDropSpec("minecraft:redstone", 2, 4, 1.0D)
+    );
+
+    private static final List<EliteDropSpec> HEAVY_ELITE_DROPS = List.of(
+            new EliteDropSpec("minecraft:iron_ingot", 4, 7, 1.0D),
+            new EliteDropSpec("minecraft:copper_ingot", 3, 6, 1.0D),
+            new EliteDropSpec("minecraft:gold_ingot", 2, 4, 1.0D),
+            new EliteDropSpec("minecraft:gunpowder", 2, 5, 1.0D),
+            new EliteDropSpec("minecraft:emerald", 1, 2, 0.60D),
+            new EliteDropSpec("minecraft:diamond", 1, 1, 0.12D)
+    );
+
+    private static final List<EliteDropSpec> JUGGERNAUT_ELITE_DROPS = List.of(
+            new EliteDropSpec("minecraft:iron_ingot", 6, 10, 1.0D),
+            new EliteDropSpec("minecraft:gold_ingot", 3, 5, 1.0D),
+            new EliteDropSpec("minecraft:redstone", 4, 8, 1.0D),
+            new EliteDropSpec("minecraft:emerald", 1, 3, 0.75D),
+            new EliteDropSpec("minecraft:diamond", 1, 1, 0.25D)
+    );
+
+    private static final List<EliteDropSpec> WARDEN_ELITE_DROPS = List.of(
+            new EliteDropSpec("minecraft:netherite_scrap", 1, 2, 1.0D),
+            new EliteDropSpec("minecraft:diamond", 2, 4, 1.0D),
+            new EliteDropSpec("minecraft:echo_shard", 2, 4, 1.0D),
+            new EliteDropSpec("minecraft:emerald", 4, 6, 1.0D),
+            new EliteDropSpec("minecraft:gunpowder", 6, 10, 1.0D)
+    );
+
+    private static final List<String> DIAMOND_CAP_FALLBACK_ITEMS = List.of(
+            "minecraft:gold_ingot",
+            "minecraft:iron_ingot",
+            "minecraft:emerald"
+    );
+
+    public static void resetEliteLootWindowState() {
+        synchronized (ELITE_DIAMOND_LOCK) {
+            recentBonusDiamondTicks.clear();
+        }
+    }
+
+    public static int getBonusDiamondsInCurrentWindow(long gameTime) {
+        synchronized (ELITE_DIAMOND_LOCK) {
+            pruneExpiredBonusDiamondTicks(gameTime);
+            return recentBonusDiamondTicks.size();
+        }
+    }
+
+    private static void pruneExpiredBonusDiamondTicks(long gameTime) {
+        while (!recentBonusDiamondTicks.isEmpty()) {
+            long oldest = recentBonusDiamondTicks.peekFirst();
+            if (gameTime < oldest || (gameTime - oldest) >= ELITE_DIAMOND_WINDOW_TICKS) {
+                recentBonusDiamondTicks.pollFirst();
+            } else {
+                break;
+            }
+        }
+    }
+
+    private static boolean tryConsumeBonusDiamondSlot(long gameTime) {
+        int maxCap = Math.max(0, ZAConfigZDay.maxBonusDiamondsPerHordeWindow);
+        if (maxCap <= 0) {
+            return false;
+        }
+        synchronized (ELITE_DIAMOND_LOCK) {
+            pruneExpiredBonusDiamondTicks(gameTime);
+            if (recentBonusDiamondTicks.size() >= maxCap) {
+                return false;
+            }
+            recentBonusDiamondTicks.addLast(gameTime);
+            return true;
+        }
+    }
+
+    public static boolean isEligibleForEliteMineralLoot(boolean isEliteHordeMob, boolean isDamageClone, double randomZeroToOne) {
+        if (!isEliteHordeMob) {
+            return false;
+        }
+        return !isDamageClone || randomZeroToOne < DAMAGE_CLONE_LOOT_MULTIPLIER;
+    }
+
+    public static EliteLootTier classifyEliteTier(Collection<String> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return null;
+        }
+        if (tags.contains(BLOODMOON_WARDEN_TAG)) {
+            return EliteLootTier.WARDEN;
+        }
+        if (tags.contains("za_juggernaut")) {
+            return EliteLootTier.JUGGERNAUT;
+        }
+        if (tags.contains(TANKER_TAG) || tags.contains(KNIGHT_TAG)) {
+            return EliteLootTier.HEAVY;
+        }
+        if (tags.contains("za_screamer") || tags.contains("za_tnt_sapper") || tags.contains(ENGINEER_TAG)) {
+            return EliteLootTier.SPECIALIST;
+        }
+        return null;
+    }
+
+    public static List<EliteDropSpec> getEliteMineralDropTable(Collection<String> tags) {
+        EliteLootTier tier = classifyEliteTier(tags);
+        if (tier == null) {
+            return List.of();
+        }
+        return switch (tier) {
+            case SPECIALIST -> SPECIALIST_ELITE_DROPS;
+            case HEAVY -> HEAVY_ELITE_DROPS;
+            case JUGGERNAUT -> JUGGERNAUT_ELITE_DROPS;
+            case WARDEN -> WARDEN_ELITE_DROPS;
+        };
+    }
+
+    private static int rollCountInRange(EliteDropSpec spec, java.util.Random rng) {
+        int span = Math.max(0, spec.maxCount() - spec.minCount());
+        return spec.minCount() + (span > 0 ? rng.nextInt(span + 1) : 0);
+    }
+
+    public static List<EliteDropRoll> rollEliteMineralDrops(Collection<String> tags, java.util.Random random) {
+        return rollEliteMineralDrops(tags, random, 0L, false);
+    }
+
+    public static List<EliteDropRoll> rollEliteMineralDrops(Collection<String> tags, java.util.Random random, long gameTime) {
+        return rollEliteMineralDrops(tags, random, gameTime, true);
+    }
+
+    public static List<EliteDropRoll> rollEliteMineralDrops(
+            Collection<String> tags,
+            java.util.Random random,
+            long gameTime,
+            boolean enforceDiamondWindowCap) {
+        if (tags == null || tags.isEmpty()) {
+            return List.of();
+        }
+        EliteLootTier tier = classifyEliteTier(tags);
+        if (tier == null) {
+            return List.of();
+        }
+        java.util.Random rng = random != null ? random : ThreadLocalRandom.current();
+        if (!isEligibleForEliteMineralLoot(true, tags.contains(DAMAGE_CLONE_TAG), rng.nextDouble())) {
+            return List.of();
+        }
+        List<EliteDropSpec> table = getEliteMineralDropTable(tags);
+        List<EliteDropRoll> rolls = new ArrayList<>(table.size());
+        for (EliteDropSpec spec : table) {
+            if (spec.chance() >= 1.0D || rng.nextDouble() < spec.chance()) {
+                String itemId = spec.itemId();
+                int count = rollCountInRange(spec, rng);
+                if (tier != EliteLootTier.WARDEN
+                        && "minecraft:diamond".equals(itemId)
+                        && enforceDiamondWindowCap
+                        && !tryConsumeBonusDiamondSlot(gameTime)) {
+                    itemId = DIAMOND_CAP_FALLBACK_ITEMS.get(rng.nextInt(DIAMOND_CAP_FALLBACK_ITEMS.size()));
+                    count = 1 + rng.nextInt(2);
+                }
+                if (count > 0) {
+                    rolls.add(new EliteDropRoll(itemId, count));
+                }
+            }
+        }
+        return rolls;
+    }
+
+    private static Item resolveEliteDropItem(String itemId) {
+        return switch (itemId) {
+            case "minecraft:iron_ingot" -> Items.IRON_INGOT;
+            case "minecraft:gunpowder" -> Items.GUNPOWDER;
+            case "minecraft:coal" -> Items.COAL;
+            case "minecraft:redstone" -> Items.REDSTONE;
+            case "minecraft:copper_ingot" -> Items.COPPER_INGOT;
+            case "minecraft:gold_ingot" -> Items.GOLD_INGOT;
+            case "minecraft:emerald" -> Items.EMERALD;
+            case "minecraft:diamond" -> Items.DIAMOND;
+            case "minecraft:netherite_scrap" -> Items.NETHERITE_SCRAP;
+            case "minecraft:echo_shard" -> Items.ECHO_SHARD;
+            default -> null;
+        };
+    }
+
+    public static int dropEliteMineralLoot(ServerLevel level, LivingEntity entity, DamageSource source) {
+        if (level == null || entity == null || !isEliteHordeMob(entity)) {
+            return 0;
+        }
+        if (level.getServer() == null || !level.getServer().isSameThread() || !level.isLoaded(entity.blockPosition())) {
+            return 0;
+        }
+        List<EliteDropRoll> rolls = rollEliteMineralDrops(
+                entity.entityTags(),
+                ThreadLocalRandom.current(),
+                level.getGameTime(),
+                true
+        );
+        int totalDropped = 0;
+        for (EliteDropRoll roll : rolls) {
+            Item item = resolveEliteDropItem(roll.itemId());
+            if (item != null && roll.count() > 0) {
+                entity.spawnAtLocation(level, new ItemStack(item, roll.count()));
+                totalDropped += roll.count();
+            }
+        }
+        return totalDropped;
+    }
+
+    public static int rollNormalHordeGunpowderDrop(
+            boolean isHordeMob,
+            boolean isEliteHordeMob,
+            boolean isDamageClone,
+            double chanceRoll,
+            int countRoll) {
+        if (!isHordeMob || isEliteHordeMob) {
+            return 0;
+        }
+        double effectiveChance = isDamageClone
+                ? NORMAL_HORDE_GUNPOWDER_DROP_CHANCE * DAMAGE_CLONE_LOOT_MULTIPLIER
+                : NORMAL_HORDE_GUNPOWDER_DROP_CHANCE;
+        if (chanceRoll < 0.0D || chanceRoll >= effectiveChance) {
+            return 0;
+        }
+        return 1 + Math.floorMod(countRoll, 3);
+    }
+
+    public static int dropNormalHordeGunpowder(ServerLevel level, LivingEntity entity) {
+        if (level == null || entity == null) {
+            return 0;
+        }
+        boolean isHorde = entity.entityTags().contains("za_horde_mob") || isHordeMob(entity);
+        boolean isElite = isEliteHordeMob(entity);
+        boolean isClone = entity.entityTags().contains(DAMAGE_CLONE_TAG);
+        if (!isHorde || isElite || level.getServer() == null || !level.getServer().isSameThread() || !level.isLoaded(entity.blockPosition())) {
+            return 0;
+        }
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        int count = rollNormalHordeGunpowderDrop(true, false, isClone, rng.nextDouble(), rng.nextInt(3));
+        if (count > 0) {
+            entity.spawnAtLocation(level, new ItemStack(Items.GUNPOWDER, count));
+        }
+        return count;
     }
 
     public static void resetDamageCloneState() {
@@ -1213,6 +1687,7 @@ public class ZAUtil {
     }
 
     public static boolean canTriggerDamageClone(
+            boolean isHordeMob,
             boolean isHostileMob,
             boolean isAlive,
             boolean hasCloneTag,
@@ -1225,7 +1700,7 @@ public class ZAUtil {
             int maxNearbyMobs,
             double cloneChance,
             double randomZeroToOne) {
-        if (!isHostileMob || !isAlive || hasCloneTag || !hasAttackerEntity || damageAmount <= 0.0f) {
+        if (!isHordeMob || !isHostileMob || !isAlive || hasCloneTag || !hasAttackerEntity || damageAmount <= 0.0f) {
             return false;
         }
         if (cloneChance <= 0.0) {
@@ -1244,6 +1719,10 @@ public class ZAUtil {
         if (level == null || mob == null || source == null || ZAConfigZDay.mobDamageCloneCount <= 0) {
             return 0;
         }
+        boolean parentIsHorde = isHordeMob(mob);
+        if (!parentIsHorde) {
+            return 0;
+        }
         if (level.getServer() == null || !level.getServer().isSameThread() || !level.isLoaded(mob.blockPosition())) {
             return 0;
         }
@@ -1256,6 +1735,7 @@ public class ZAUtil {
         ).size();
 
         boolean allowed = canTriggerDamageClone(
+                parentIsHorde,
                 isHostileMob(mob),
                 mob.isAlive() && !mob.isRemoved(),
                 mob.entityTags().contains(DAMAGE_CLONE_TAG),
@@ -1279,7 +1759,6 @@ public class ZAUtil {
         }
         lastDamageCloneTickMap.put(mob.getUUID(), gameTime);
 
-        boolean parentIsHorde = isHordeMob(mob);
         boolean parentIsApex = mob.entityTags().contains("za_apex_corrosive");
         LivingEntity preferredTarget = mob.getTarget();
         if (preferredTarget != null && (!preferredTarget.isAlive() || shouldBlockHordeTarget(mob, preferredTarget))) {

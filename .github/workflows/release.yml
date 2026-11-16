@@ -13,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag name (e.g. v26.3-1.13.1)'
+        description: 'Release tag name (e.g. v26.3-1.14.0)'
         required: false
-        default: 'v26.3-1.13.1'
+        default: 'v26.3-1.14.0'
         type: string
 
 permissions:
@@ -47,7 +47,16 @@ jobs:
       - name: Build, run JUnit 5 tests & compile testmod
         run: |
           chmod +x gradlew
-          ./gradlew clean build compileTestmodJava --no-daemon --console=plain -Dorg.gradle.java.home="$JAVA_HOME"
+          GRADLE_VERSION_FLAGS=""
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_VER="${GITHUB_REF_NAME#v}"
+            GRADLE_VERSION_FLAGS="-Prelease=true -Pmod_version=${TAG_VER}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            DISPATCH_TAG="${{ inputs.tag_name || 'v26.3-1.14.0' }}"
+            TAG_VER="${DISPATCH_TAG#v}"
+            GRADLE_VERSION_FLAGS="-Prelease=true -Pmod_version=${TAG_VER}"
+          fi
+          ./gradlew clean build compileTestmodJava ${GRADLE_VERSION_FLAGS} --no-daemon --console=plain -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Upload built JAR artifacts
         uses: actions/upload-artifact@v4
@@ -62,8 +71,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && (inputs.tag_name || 'v26.3-1.13.1') || github.ref_name }}
-          name: ZombieAwareness ${{ github.event_name == 'workflow_dispatch' && (inputs.tag_name || 'v26.3-1.13.1') || github.ref_name }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && (inputs.tag_name || 'v26.3-1.14.0') || github.ref_name }}
+          name: ZombieAwareness ${{ github.event_name == 'workflow_dispatch' && (inputs.tag_name || 'v26.3-1.14.0') || github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

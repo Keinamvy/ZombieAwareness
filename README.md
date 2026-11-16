@@ -55,7 +55,16 @@ In ordinary zombie shooters, guns solve problems. Here, guns solve *one* problem
 - **Scaled Horde Caps & Attrition**:
   - `baseSwarmWaveSize = 48`
   - `hordeMaxAliveNearPlayer = 180` solo (scales `+40` per extra squadmate, and doubles to **`360+`** during Bloodmoon nights).
-  - **8% On-Damage Clones (`za_damage_clone`)**: Damaged hostile mobs have an `8%` chance (`mobDamageCloneChance = 0.08`) to spawn `2` flanking clones (`mobDamageCloneCount = 2`), guarded by a `200`-tick per-mob cooldown, `48`-mob nearby cap, and recursion prevention (`za_damage_clone` mobs never clone further).
+  - **Horde-Only 8% On-Damage Clones (`za_damage_clone`)**: Damaged **horde** hostile mobs (`isHordeMob`, never wild normal mobs) have an `8%` chance (`mobDamageCloneChance = 0.08`) to spawn `2` flanking clones (`mobDamageCloneCount = 2`), guarded by a `200`-tick per-mob cooldown, `48`-mob nearby cap, recursion prevention (`za_damage_clone` mobs never clone further), and **`25%` loot drop scaling** (`DAMAGE_CLONE_LOOT_MULTIPLIER = 0.25`). Likewise, NightmareESM spawn duplication only triggers on horde mobs.
+- **Stage-Scaled Early-Game Elite Restraint (`computeStageEliteSpawnMultiplier`)**:
+  - **Stage 1 (Days 1–20)**: `0.0x` elite multiplier — `0%` special units (standard Zombies & Spiders only).
+  - **Stage 2 (Days 21–40)**: `0.15x` elite multiplier — rare Crawlers/Tankers only (~1–3%); `0%` Engineers, Knights, Screamers, Juggernauts, Sappers.
+  - **Stages 3–4 (Days 41–56)**: `0.30x` / `0.40x` — modest Tankers/Crawlers and newly unlocked `[ENGINEER]`.
+  - **Stages 5–6 (Days 57–72)**: `0.55x` / `0.70x` — unlocks `[KNIGHT]` at Stage 5 and `[SCREAMER]` at Stage 6 at reduced rates.
+  - **Stages 7–8 (Days 73–90)**: `0.80x` / `0.90x` — unlocks `[JUGGERNAUT]` at Stage 7 and `[SAPPER]` at Stage 8; ambient NightmareESM Screamer & Juggernaut rolls also scale by stage.
+  - **Stages 9–10 (Days 91–100+)**: `1.0x` full siege intensity.
+- **70/30 Pincer & Silent Flank Waves**: `spawnPhasedSubWave` routes **70%** of spawns (`index % 10 < 7`) along the primary front (`approachAngleRad`, favoring `[TANKER]`, `[JUGGERNAUT]`, `[ENGINEER]`, and mainline troops) and **30%** into **silent flanking ambushes** (`index % 10 >= 7`, spawned `120°–240°` behind the front without an extra roar, favoring `[CRAWLER]`, `[KNIGHT]`, and `[SAPPER]`).
+- **`<= 24m` Victory Close-Combat Retention**: When a horde ends in **Victory**, only stragglers further than **`24.0` blocks** from the nearest alive player retreat and despawn cleanly with smoke particles—mobs already engaged within **`<= 24.0` blocks** fight to the death! (All remaining Siege Engineer bridges/pillars collapse immediately on victory, wipe, or target loss.)
 - **Active Player Tracking**: Hordes lock onto player positions (`noTargetTicks` auto-cancels after `100` ticks if no players remain in range) and **strictly ignore villagers** (`ZAUtil.shouldBlockHordeTarget` / `MixinMob`), keeping the siege focused on players and their defenses.
 
 ### The 6 Intra-Horde Phases (Extended Climax Phases 4 & 5)
@@ -65,8 +74,8 @@ Phases 4 and 5 are extended to occupy **55%** (`27% + 28%`) of the entire 5-minu
 | :---: | :---: | :--- | :--- |
 | **1A** | `0% – 10%` (`0:00 – 0:30`) | **The Cardio Check** | **Speed II Sprinter Zombies** backed by early **`[TANKER]` Zombies** soaking perimeter fire. |
 | **1B** | `10% – 20%` (`0:30 – 1:00`) | **Spicy Cobwebs** | **Cave Spiders & Spiders**, Sprinters, and frontline **`[TANKER]`** units. |
-| **2** | `20% – 32%` (`1:00 – 1:36`) | **Breachers & Cavalry** | **Pickaxe Breachers**, **Blackout Stalkers**, **Skeletons/Strays**, **`[TANKER]`**, and mounted **`[KNIGHT]`** Zombie Horseman cavalry. |
-| **3** | `32% – 45%` (`1:36 – 2:15`) | **Juggernauts & Crawlers** | **`[JUGGERNAUT]`**, **`[CRAWLER]`**, **`[TANKER]`**, **`[KNIGHT]`**, Spiders, Skeletons, and Witches (plus aerial Phantom drops from Stage 5+). |
+| **2** | `20% – 32%` (`1:00 – 1:36`) | **Breachers & Cavalry** | **Pickaxe Breachers**, **Blackout Stalkers**, **Skeletons/Strays**, **`[TANKER]`**, **`[ENGINEER]`**, and mounted **`[KNIGHT]`** Zombie Horseman cavalry. |
+| **3** | `32% – 45%` (`1:36 – 2:15`) | **Juggernauts & Crawlers** | Thrower **`[JUGGERNAUT]`**, **`[CRAWLER]`**, **`[ENGINEER]`**, **`[TANKER]`**, **`[KNIGHT]`**, Spiders, Skeletons, and Witches (plus aerial Phantom drops from Stage 5+). |
 | **4** | `45% – 72%` (`2:15 – 3:36`) | **Climax Sappers (Extended 27%)** | Climax roar sounds. **`[SAPPER]`** TNT demolitionists, **`[JUGGERNAUT]`**, **`[TANKER]`**, **`[KNIGHT]`**, Creepers, Skeletons, and Phantom paratroopers. Decimation rule triggers early victory if `< 2%` remain. |
 | **5** | `72% – 100%` (`3:36 – 5:00`) | **Apex Corrosion (Extended 28%)** | Armor-piercing & healing-reducing **`[CORROSIVE]`** apex horde (Wither Skeletons, Diamond-Spear Knights, Tankers, Sappers). On **Bloodmoon nights**, **3 `[SIEGE WARDEN]` bosses** emerge to snipe TACZ-Turrets from standoff range! |
 
@@ -95,11 +104,30 @@ All special horde units feature colored overhead nameplates (`setCustomNameVisib
 | **Tanker Zombie** (`za_tanker`) | **`§b§l[TANKER]`** | `1.35x` scale, **`0.16`** speed (slower, skips random speed boost), `40+` HP, `90%` KB res, **Resistance III** | Netherite Helmet/Boots, Diamond Chest/Legs, Offhand **Shield**. Pulls enabled **TACZ-Turrets** (`tacz_turrets:turret` / `sentry_turret`) target focus every `5` ticks via `alertTo` + `ATTACK_TARGET`. |
 | **Knight Zombie** (`za_knight` / `za_knight_mount`) | **`§6§l[KNIGHT]`** | `1.10x` scale, `30+` HP, `50%` KB res, **Resistance I** | Uses **vanilla MC 26.3 `ZombieHorse`** cavalry (`EntitySpawnReason.NATURAL`) carrying **Iron Spear** (or **Diamond Spear** in Phase 5) and full Iron armor; synchronized mount steering. |
 | **Siege Warden** (`za_bloodmoon_warden`) | **`§5§l[SIEGE WARDEN]`** | `1.15x` scale, persistent (`setDigCooldown` kept topped up) | **3 spawn** once per Bloodmoon Phase 5 horde. Prioritizes enabled **TACZ-Turrets** within `64` blocks over players, holds a **`12–24` block standoff**, fires long-range **Sonic Boom** beams (`34`-tick charge, `14.0` sonic damage up to `48` blocks), and is strictly **blocked from targeting or damaging fellow horde/hostile mobs** (`MixinWarden` + `MixinLivingEntity`). |
-| **Armored Juggernaut** (`za_juggernaut`) | **`§4§l[JUGGERNAUT]`** | `1.20x` scale, `85%` KB resistance | Heavy iron/random armor frontline shock trooper. |
-| **Crawler** (`za_crawler`) | **`§e§l[CRAWLER]`** | `0.75x` scale, Speed II | Low-profile fast flanker inflicting **Slowness II** on hit. |
+| **Siege Engineer** (`za_engineer`) | **`§3§l[ENGINEER]`** | `1.05x` scale | Spawns in Phase 2–5 front waves (~11–13%). Wields an Iron Pickaxe + Coarse Dirt offhand and Chainmail armor. Exclusively unlocks Cobblestone pillars (`MobBuildUp`) and Coarse Dirt bridges (`MobBuildBridge`) from **Stage 3+**. Placed blocks **auto-decay after `60s` (`1200` ticks)** with no drops and collapse immediately when the horde ends. |
+| **Thrower Juggernaut** (`za_juggernaut`) | **`§4§l[JUGGERNAUT]`** | `1.20x` scale, `85%` KB resistance | Heavy iron/armored shock trooper. Every **`10s` (`200` ticks)** selects targets in **`8–28` blocks**—**strictly prioritizing enabled TACZ-Turrets before survival players**—and launches nearby `[CRAWLER]`/`[SAPPER]` units (or converts a nearby horde zombie into a `[CRAWLER]`) along a ballistic arc (`za_thrown_projectile`, fall-damage immune on landing). Thrown `[SAPPER]` units arm a **`2.5s` (`50`-tick)** landing fuse! |
+| **Crawler** (`za_crawler`) | **`§e§l[CRAWLER]`** | `0.75x` scale, Speed II | Low-profile fast flanker inflicting **Slowness II** on hit; also hurled as Juggernaut siege ammo. |
 | **Screamer Scout** (`za_screamer`) | **`§d§l[SCREAMER]`** | `1.05x` scale, **Glowing** | **Golden Helmet** scout that shrieks and summons reinforcements on contact. |
-| **TNT Sapper** (`za_tnt_sapper`) | **`§c§l[SAPPER]`** | Demolitionist | Carries **TNT** in mainhand; plants `za_sapper_tnt` against fortified walls (0 friendly-fire to hostile/horde mobs). |
+| **TNT Sapper** (`za_tnt_sapper`) | **`§c§l[SAPPER]`** | Demolitionist | Carries **TNT** in mainhand; plants `za_sapper_tnt` against fortified walls (0 friendly-fire to hostile/horde mobs), and detonates `2.5s` after touchdown when thrown by a Juggernaut. |
 | **Apex Corrosive** (`za_apex_corrosive`) | **`§2§l[CORROSIVE]`** | Phase 5 modifier | Applies Necrotic Trauma (halved player healing for 8s), armor durability shred, and `40%` armor-bypass damage split. |
+
+---
+
+## ❤️‍🔥 1-Heart Clutch, 12s Adrenaline Surge & Elite Mineral Loot Drops
+
+- **1-Heart Clutch Epilogue (`ZAUtil` + `MixinLivingEntity`, EnhancedVisuals-Compatible)**:
+  - Whenever an alive non-creative/spectator `ServerPlayer` takes a non-void/non-kill hit that would drop them to **`<= 2.0F` HP (1 heart)** or kill them, there is a **`25%` chance** (`5`-minute / `6000`-tick cooldown) to cheat death cleanly at **`2.0F` HP (1 heart)**—directly activating **`EnhancedVisuals`**'s low-HP heartbeat & blurry vision overlay.
+  - Grants **`2.0s` (`40` ticks)** of post-clutch damage immunity (`za$clutchInvulUntilTick`), plays `WARDEN_HEARTBEAT` + `TOTEM_USE`, flashes a randomized protagonist inner-monologue epilogue (actionbar + subtitle, e.g., *"Not here... not like this."*), and triggers **12 seconds (`240` ticks) of Adrenaline Surge**:
+    - **Speed II**, **Haste II**, and **Strength I**.
+    - **Life-on-Kill**: Every hostile or horde mob killed during Adrenaline Surge heals **`+2.0F` (+1 heart)** with crystal chime feedback.
+- **Normal Horde Gunpowder Bonus & Elite Mineral Crafting Loot (`dropAllDeathLoot`)**:
+  - Standard fodder `za_horde_mob` spawns drop vanilla loot **`20%`** of the time (80% suppression), PLUS receive a dedicated **`50%` chance to drop `1–3` Gunpowder** (`12.5%` for `za_damage_clone` normal horde mobs), bypassing the 80% fodder suppression so standard hordes reliably fuel gun/ammo crafting!
+  - **`za_damage_clone`** mobs drop both vanilla loot and bonus elite mineral loot at **`25%` of a normal mob's rate**, and all **7 non-clone elite classes** (`za_screamer`, `za_tnt_sapper`, `za_engineer`, `za_tanker`, `za_knight`, `za_juggernaut`, `za_bloodmoon_warden`) bypass the suppression for full vanilla loot.
+  - Non-clone elites (plus elite `za_damage_clone` kills on their `25%` roll) drop multi-bundle crafting supplies paired with **medium-tuned Diamond rates** and a **`<= 32` (half-stack) non-Warden Diamond cap per `6000`-tick (`5`-minute) rolling window** (`maxBonusDiamondsPerHordeWindow = 32`, overflow diamonds convert to `1–2` Gold Ingots, Iron Ingots, or Emeralds):
+    - **Support** (`za_screamer`, `za_tnt_sapper`, `za_engineer`): `2–4` Iron Ingots, `2–4` Copper Ingots, `2–4` Gunpowder, `2–5` Coal, and `2–4` Redstone (`0%` Diamonds).
+    - **Frontline** (`za_tanker`, `za_knight`): `4–7` Iron Ingots, `3–6` Copper Ingots, `2–4` Gold Ingots, `2–5` Gunpowder, `1–2` Emeralds (`60%`), and **`1` Diamond (`12%`)**.
+    - **Heavy** (`za_juggernaut`): `6–10` Iron Ingots, `3–5` Gold Ingots, `4–8` Redstone, `1–3` Emeralds (`75%`), and **`1` Diamond (`25%`)**.
+    - **Boss** (`za_bloodmoon_warden`): `1–2` Netherite Scrap, `2–4` Diamonds (`100%`), `2–4` Echo Shards, `4–6` Emeralds, and `6–10` Gunpowder.
 
 ---
 
@@ -112,7 +140,7 @@ All special horde units feature colored overhead nameplates (`setCustomNameVisib
 
 ## ⚡ Companion Addon Mod: `za-horde-optimizer`
 
-Included directly in the repository under [`horde-optimizer/`](horde-optimizer/), **`za_horde_optimizer`** (`za-horde-optimizer-fabric-26.3-1.0.0.jar`) is a standalone Fabric 26.3 addon mod that eliminates mega-horde server lag:
+Included directly in the repository under [`horde-optimizer/`](horde-optimizer/), **`za_horde_optimizer`** (`za-horde-optimizer-fabric-26.3-1.1.0.jar`) is a standalone Fabric 26.3 addon mod that eliminates mega-horde server lag:
 
 1. **Horde Collision & Cramming Suppression**:
    - Intercepts `Entity#push`, `LivingEntity#pushEntities`, `LivingEntity#doPush`, and `LivingEntity#isPushable` (`MixinEntityCollision`, `MixinLivingEntityCollision`, `HordeCollisionPolicy`).
@@ -132,22 +160,22 @@ Zombie Awareness and NightmareESM are hardened for heavily threaded modpacks (e.
 
 ---
 
-## 📅 The 10-Stage World-Age Escalation Table (Days 1 → 30+)
+## 📅 The 10-Stage 100-Day World-Age Escalation Table (Days 1 → 100+)
 
-`ZDayProgressionManager` freezes world apocalypse progression whenever `0` players are online (`activePlayTicks` persisted in `<world>/data/zombieawareness_zday_ledger.json`) and presents returning players with a *"While You Were Away"* Intelligence Dossier.
+`ZDayProgressionManager` freezes world apocalypse progression whenever `0` players are online (`activePlayTicks` persisted in `<world>/data/zombieawareness_zday_ledger.json`) and presents returning players with a *"While You Were Away"* Intelligence Dossier. **Stages 1 & 2 cover the first 40 days** (`Days 1–20` and `Days 21–40`), ramping across `Days 41–100+`:
 
-| Stage | Default Day | Codename | Key Unlock |
+| Stage | Day Window | Codename | Key Unlock & Elite Scaling |
 | :---: | :---: | :--- | :--- |
-| **1** | **Day 1** | **Quiet Outbreak** | Base sensory AI & blood scent below 50% HP. Sleep permitted. |
-| **2** | **Day 4** | **TaCZ Acoustic Discipline** | Gunfire sound nodes (`112m`) & Chunk Heat (`100` threshold) trigger directional swarms. |
-| **3** | **Day 6** | **Blackout Stalkers** | Mobs hunt & smash torches/lanterns (`64m`). |
-| **4** | **Day 8** | **The Crimson Bloodmoon** | Periodic Bloodmoons (every 6 days), sleep blocked, doubled horde caps. |
-| **5** | **Day 11** | **Pickaxe Breachers** | Zombies mine walls/doors (`MobDig`); Phantoms begin aerial drops in hordes. |
-| **6** | **Day 14** | **Web-Trappers & Bloodlust** | Ranged web-shooting Spiders & Bloodlust sprints. |
-| **7** | **Day 18** | **Screamer Scouts** | Mutated `[SCREAMER]` scouts alert nearby hordes. |
-| **8** | **Day 22** | **Combat Engineers** | Pillar-up (`MobBuildUp`) and chasm-bridging (`MobBuildBridge`). |
-| **9** | **Day 26** | **Juggernauts & Crawlers** | `[JUGGERNAUT]` heavy shock troops & low-HP `[CRAWLER]` conversions. |
-| **10** | **Day 30+** | **Demolition Sappers & Total Collapse** | `[SAPPER]` TNT breaching, Fire-Starters, Phase 4/5 `[CORROSIVE]` apex siege, and 3x Bloodmoon `[SIEGE WARDEN]` bosses. |
+| **1** | **Days 1 – 20** | **Quiet Outbreak** | Base sensory AI & blood scent below 50% HP. Sleep permitted. `0%` horde elites. |
+| **2** | **Days 21 – 40** | **TaCZ Acoustic Discipline** | Gunfire sound nodes (`112m`) & Chunk Heat (`100` threshold) trigger swarms. `0.15x` elite scale (rare Crawlers/Tankers only). |
+| **3** | **Days 41 – 48** | **Blackout Stalkers & Siege Engineers** | Mobs smash perimeter torches/lanterns (`64m`); `[ENGINEER]` unlocks Stage 3+ 60s-decaying bridges/pillars (`0.30x` elites). |
+| **4** | **Days 49 – 56** | **The Crimson Bloodmoon** | Periodic Bloodmoons (every 6 days), sleep blocked, doubled horde caps (`0.40x` elites). |
+| **5** | **Days 57 – 64** | **Pickaxe Breachers & Knights** | Zombies mine walls/doors (`MobDig`), Phantoms begin aerial drops, and `[KNIGHT]` cavalry unlocks (`0.55x` elites). |
+| **6** | **Days 65 – 72** | **Web-Trappers & Screamer Scouts** | Ranged web-shooting Spiders, Bloodlust sprints, and `[SCREAMER]` spawns (`0.70x` elites). |
+| **7** | **Days 73 – 81** | **Juggernauts & Heavy Siege** | Thrower `[JUGGERNAUT]` unlocks (`0.80x` elites), ambient Screamers ramp up, and late-game hordes intensify. |
+| **8** | **Days 82 – 90** | **Sapper Demolition** | `[SAPPER]` TNT demolitionists unlock (`0.90x` elites) alongside stray marksmen and sustained sieges. |
+| **9** | **Days 91 – 99** | **Apex Escalation** | Full `1.0x` elite spawn rate + NightmareESM Juggernaut/Crawler damage conversions. |
+| **10** | **Day 100+** | **Total Collapse** | Full Phase 4/5 `[CORROSIVE]` apex siege, Fire-Starters, Creeper breaching, and 3x Bloodmoon `[SIEGE WARDEN]` bosses. |
 
 ### Commands
 - `/zday` or `/zday status`: Current World Day, Stage (`1–10`), Bloodmoon status, and Chunk Heat.
@@ -168,21 +196,27 @@ Zombie Awareness and NightmareESM are hardened for heavily threaded modpacks (e.
 - **Optional Integrations**:
   - **TaCZ (Timeless and Classics Zero)**: Firearm acoustic hooks & Chunk Heat.
   - **TACZ-Turrets (`tacz_turrets`)**: `[TANKER]` turret-focus pull and Bloodmoon `[SIEGE WARDEN]` anti-turret Sonic Boom prioritization.
-  - **`za-horde-optimizer`**: Drop `za-horde-optimizer-fabric-26.3-1.0.0.jar` alongside `zombieawareness-fabric-26.3-1.13.1.jar` for collision suppression + cluster optimization.
+  - **`za-horde-optimizer`**: Drop `za-horde-optimizer-fabric-26.3-1.1.0.jar` alongside `zombieawareness-fabric-26.3-1.14.0.jar` for collision suppression + cluster optimization.
 
-### Building & Running Tests
+### Building, Automatic Versioning & Running Tests
+
+- **Release Builds (`-Prelease=true` or `v*` Git tag)**: Produce clean SemVer artifacts (`26.3-1.14.0` and `26.3-1.1.0`), automated in [`.github/workflows/release.yml`](.github/workflows/release.yml).
+- **Development Builds (default `./gradlew build` off-tag)**: Automatically append SemVer build metadata (`+build.<commitCount>.g<shortSha>`) for traceability, with optional `-Pmod_version=...` / `-Paddon_version=...` overrides.
 
 ```bash
 # Ensure Java 25 is active
 java -version
 
-# Clean build both ZombieAwareness and za-horde-optimizer + run all JUnit 5 tests
-./gradlew clean build
+# Clean release build for both ZombieAwareness and za-horde-optimizer + run all JUnit 5 tests
+./gradlew clean build -Prelease=true
+
+# Non-release dev build (appends +build.<count>.g<sha>)
+./gradlew build
 
 # Also verify the Fabric testmod sources compile cleanly
-./gradlew compileTestmodJava
+./gradlew compileTestmodJava -Prelease=true
 ```
 
-Built artifacts are output to:
-- Main mod: `build/libs/zombieawareness-fabric-26.3-1.13.1.jar`
-- Horde Optimizer addon: `horde-optimizer/build/libs/za-horde-optimizer-fabric-26.3-1.0.0.jar`
+Built release artifacts are output to:
+- Main mod: `build/libs/zombieawareness-fabric-26.3-1.14.0.jar`
+- Horde Optimizer addon: `horde-optimizer/build/libs/za-horde-optimizer-fabric-26.3-1.1.0.jar`

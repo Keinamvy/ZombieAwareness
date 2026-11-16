@@ -2,12 +2,19 @@ package com.nll.nightmareesm;
 
 import com.nll.nightmareesm.MobBehavs.CreeperBreachWalls;
 import com.nll.nightmareesm.MobBehavs.MobBreakLightSources;
+import com.nll.nightmareesm.MobBehavs.MobPlaceBlock;
 import com.nll.nightmareesm.MobBehavs.MobScreamerAlert;
 import com.nll.nightmareesm.helpers.ConfigHelper;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +57,7 @@ public class NightmareWorldgenDeadlockTest {
    }
 
    @Test
-   @DisplayName("Duplication is allowed for live ServerLevel natural spawns on the server thread")
+   @DisplayName("Duplication is allowed only for live ServerLevel horde spawns and stage roll scaling prevents early elite floods")
    void testAllowsLiveServerThreadNaturalSpawn() {
       assertTrue(
          nightmareesm.canDuplicateOnFinalizeSpawn(EntitySpawnReason.NATURAL, true, true),
@@ -60,6 +67,26 @@ public class NightmareWorldgenDeadlockTest {
          nightmareesm.canDuplicateOnFinalizeSpawn(EntitySpawnReason.REINFORCEMENT, true, true),
          "Live ServerLevel REINFORCEMENT spawns on the server thread should be allowed"
       );
+
+      // Horde-only duplication guard: normal non-horde mobs cannot clone
+      assertFalse(
+         nightmareesm.canDuplicateOnFinalizeSpawn(EntitySpawnReason.NATURAL, true, true, false),
+         "Normal non-horde mobs must never trigger finalizeSpawn duplication"
+      );
+      assertTrue(
+         nightmareesm.canDuplicateOnFinalizeSpawn(EntitySpawnReason.NATURAL, true, true, true),
+         "Tagged horde mobs on live server thread may duplicate"
+      );
+
+      // Stage-scaled Screamer & Juggernaut roll percentages
+      assertEquals(0, nightmareesm.computeScreamerRollPercent(6));
+      assertEquals(6, nightmareesm.computeScreamerRollPercent(7));
+      assertEquals(7, nightmareesm.computeScreamerRollPercent(8));
+      assertEquals(8, nightmareesm.computeScreamerRollPercent(10));
+
+      assertEquals(0, nightmareesm.computeJuggernautRollPercent(8));
+      assertEquals(12, nightmareesm.computeJuggernautRollPercent(9));
+      assertEquals(12, nightmareesm.computeJuggernautRollPercent(10));
    }
 
    @Test
@@ -180,5 +207,63 @@ public class NightmareWorldgenDeadlockTest {
       assertFalse(MobBreakLightSources.tryBreakNearbyLight(null));
       assertFalse(new CannotReachPlayer().CannotReach(null));
       assertDoesNotThrow(CreeperBreachWalls::clearTickMap);
+   }
+
+   @Test
+   @DisplayName("MobPlaceBlock tracks engineer blocks with 60s (1200-tick) decay and horde-end collapse")
+   void testEngineerBlockDecayAndCollapse() {
+      MobPlaceBlock.clearAll();
+      ResourceKey<Level> testDim = ResourceKey.create(
+         ResourceKey.createRegistryKey(Identifier.withDefaultNamespace("dimension")),
+         Identifier.withDefaultNamespace("overworld")
+      );
+      try {
+         assertEquals(1200L, MobPlaceBlock.DECAY_TICKS);
+         assertFalse(MobPlaceBlock.shouldDecayBlock(100L, 1299L), "Must not decay before 1200 ticks");
+         assertTrue(MobPlaceBlock.shouldDecayBlock(100L, 1300L), "Must decay at exactly 1200 ticks (60s)");
+         assertTrue(MobPlaceBlock.shouldDecayBlock(500L, 50L), "Must decay/evict on clock wrap");
+
+         BlockPos posOld = new BlockPos(10, 64, 10);
+         BlockPos posFresh = new BlockPos(11, 64, 10);
+         BlockPos posUnloaded = new BlockPos(12, 64, 10);
+
+         MobPlaceBlock.recordTrackedEntry(testDim, posOld, null, 100L);
+         MobPlaceBlock.recordTrackedEntry(testDim, posFresh, null, 500L);
+         MobPlaceBlock.recordTrackedEntry(testDim, posUnloaded, null, 100L);
+         assertEquals(3, MobPlaceBlock.getTrackedCount(testDim));
+
+         Set<BlockPos> destroyed = new HashSet<>();
+         // At tick 1299, nothing is 1200 ticks old yet
+         int decayedEarly = MobPlaceBlock.tickDecay(testDim, 1299L, pos -> true, (pos, blk) -> destroyed.add(pos));
+         assertEquals(0, decayedEarly);
+         assertEquals(3, MobPlaceBlock.getTrackedCount(testDim));
+
+         // At tick 1300, posOld decays (loaded), posUnloaded stays tracked (unloaded), posFresh remains (only 800 ticks old)
+         int decayedAt1300 = MobPlaceBlock.tickDecay(
+            testDim,
+            1300L,
+            pos -> !pos.equals(posUnloaded),
+            (pos, blk) -> destroyed.add(pos)
+         );
+         assertEquals(1, decayedAt1300);
+         assertTrue(destroyed.contains(posOld));
+         assertFalse(destroyed.contains(posUnloaded));
+         assertFalse(destroyed.contains(posFresh));
+         assertEquals(2, MobPlaceBlock.getTrackedCount(testDim));
+
+         // Horde-end collapse clears all remaining entries and destroys loaded ones
+         destroyed.clear();
+         int collapsed = MobPlaceBlock.collapseAllBlocks(
+            testDim,
+            pos -> !pos.equals(posUnloaded),
+            (pos, blk) -> destroyed.add(pos)
+         );
+         assertEquals(1, collapsed);
+         assertTrue(destroyed.contains(posFresh));
+         assertFalse(destroyed.contains(posUnloaded));
+         assertEquals(0, MobPlaceBlock.getTrackedCount(testDim));
+      } finally {
+         MobPlaceBlock.clearAll();
+      }
    }
 }

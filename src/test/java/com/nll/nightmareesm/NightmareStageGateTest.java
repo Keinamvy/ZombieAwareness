@@ -41,14 +41,14 @@ public class NightmareStageGateTest {
 
    @ParameterizedTest
    @ValueSource(ints = {3, 4})
-   @DisplayName("Stages 3 and 4 allow BLACKOUT_STALKER only")
+   @DisplayName("Stages 3 and 4 allow BLACKOUT_STALKER and BRIDGE_PILLAR (Siege Engineer) only")
    void testBlackoutStalkerUnlockedAtStage3(int stage) {
       assertTrue(nightmareesm.canUseBehaviorForStage("BLACKOUT_STALKER", stage));
       assertFalse(nightmareesm.canUseBehaviorForStage("PICKAXE_DIG", stage));
       assertFalse(nightmareesm.canUseBehaviorForStage("SPIDER_WEB", stage));
       assertFalse(nightmareesm.canUseBehaviorForStage("BLOODLUST", stage));
       assertFalse(nightmareesm.canUseBehaviorForStage("SCREAMER_SCOUT", stage));
-      assertFalse(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", stage));
+      assertTrue(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", stage));
       assertFalse(nightmareesm.canUseBehaviorForStage("JUGGERNAUT_CRAWLER", stage));
       assertFalse(nightmareesm.canUseBehaviorForStage("TNT_SAPPER", stage));
       assertFalse(nightmareesm.canUseBehaviorForStage("CREEPER_BREACH", stage));
@@ -81,15 +81,17 @@ public class NightmareStageGateTest {
    void testScreamerScoutUnlockedAtStage7() {
       assertFalse(nightmareesm.canUseBehaviorForStage("SCREAMER_SCOUT", 6));
       assertTrue(nightmareesm.canUseBehaviorForStage("SCREAMER_SCOUT", 7));
-      assertFalse(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 7));
+      assertTrue(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 7));
    }
 
    @Test
-   @DisplayName("Mob building and bridging is disabled per user request")
-   void testBridgePillarDisabledAtAllStages() {
-      assertFalse(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 7));
-      assertFalse(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 8), "Mob building/bridging/pillaring is permanently disabled");
-      assertFalse(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 10));
+   @DisplayName("Stage 3 unlocks BRIDGE_PILLAR for Siege Engineers")
+   void testBridgePillarUnlockedAtStage3() {
+      assertFalse(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 2));
+      assertTrue(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 3));
+      assertTrue(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 7));
+      assertTrue(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 8));
+      assertTrue(nightmareesm.canUseBehaviorForStage("BRIDGE_PILLAR", 10));
       assertFalse(nightmareesm.canUseBehaviorForStage("JUGGERNAUT_CRAWLER", 8));
    }
 
@@ -104,20 +106,13 @@ public class NightmareStageGateTest {
    }
 
    @Test
-   @DisplayName("Stage 10 Demolition Sappers unlocks TNT, Creeper breaching, and Fires")
+   @DisplayName("Stage 10 Demolition Sappers unlocks all siege behaviors including BRIDGE_PILLAR")
    void testStage10CollapseEnablesAllSiegeBehaviors() {
       for (String behavior : ALL_BEHAVIORS) {
-         if ("BRIDGE_PILLAR".equalsIgnoreCase(behavior)) {
-            assertFalse(
-               nightmareesm.canUseBehaviorForStage(behavior, 10),
-               "BRIDGE_PILLAR must remain disabled at Stage 10 per user request"
-            );
-         } else {
-            assertTrue(
-               nightmareesm.canUseBehaviorForStage(behavior, 10),
-               "Behavior " + behavior + " must be unlocked at Stage 10"
-            );
-         }
+         assertTrue(
+            nightmareesm.canUseBehaviorForStage(behavior, 10),
+            "Behavior " + behavior + " must be unlocked at Stage 10"
+         );
       }
    }
 
@@ -140,7 +135,7 @@ public class NightmareStageGateTest {
       assertTrue(nightmareesm.canUseBehaviorForStage("spider_web", 6));
       assertTrue(nightmareesm.canUseBehaviorForStage("BloodLust", 6));
       assertTrue(nightmareesm.canUseBehaviorForStage("screamer_scout", 7));
-      assertFalse(nightmareesm.canUseBehaviorForStage("Bridge_Pillar", 8));
+      assertTrue(nightmareesm.canUseBehaviorForStage("Bridge_Pillar", 8));
       assertTrue(nightmareesm.canUseBehaviorForStage("Juggernaut_Crawler", 9));
       assertTrue(nightmareesm.canUseBehaviorForStage("tnt_sapper", 10));
       assertTrue(nightmareesm.canUseBehaviorForStage("creeper_breach", 10));

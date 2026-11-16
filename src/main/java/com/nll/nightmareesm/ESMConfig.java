@@ -94,10 +94,9 @@ public class ESMConfig {
    public static final BooleanValue AllowZombieGriefing = new BooleanValue("iszombiegriefing", "Allow Zombies To Destroy Blocks?", true);
    public static final BooleanValue AllowZombieGriefingOnlyIfPickaxe = new BooleanValue("iszombiedigifpickaxeonly", "If true, zombies can only destroy blocks if they have a pickaxe.", false);
    /**
-    * Reserved configuration flag for the isolated Zombie Build ability
-    * ({@link com.nll.nightmareesm.MobBehavs.MobBuildBridge} and {@link com.nll.nightmareesm.MobBehavs.MobBuildUp}).
-    * Currently unused because {@code BRIDGE_PILLAR} is disabled in {@code nightmareesm.canUseBehaviorForStage};
-    * retained for future re-enablement.
+    * Legacy configuration flag for Zombie Building ({@link com.nll.nightmareesm.MobBehavs.MobBuildBridge}
+    * and {@link com.nll.nightmareesm.MobBehavs.MobBuildUp}). Siege Engineer building is gated by
+    * {@code za_engineer} and stage 3+ ({@code BRIDGE_PILLAR}); retained for config schema compatibility.
     */
    public static final BooleanValue AllowZombieBuilding = new BooleanValue("iszombiebuilding", "Allow Zombies To Place Blocks?", false);
    public static final DoubleValue ZombieDigHeightDistance = new DoubleValue("zombiedigheightdistance", "If the height distance (mob to player) less than this #, mob will start digging.", 16.0);

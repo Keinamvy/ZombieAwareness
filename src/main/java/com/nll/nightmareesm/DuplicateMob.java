@@ -1,5 +1,6 @@
 package com.nll.nightmareesm;
 
+import com.corosus.zombieawareness.ZAUtil;
 import com.nll.nightmareesm.helpers.ConfigHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -16,7 +17,7 @@ public class DuplicateMob {
    }
 
    public static void duplicate(Mob M, int Count) {
-      if (M != null && Count > 0 && ConfigHelper.ConfigHasValue(ESMConfig.DuplicatedMobs, M, false)) {
+      if (M != null && Count > 0 && ZAUtil.isHordeMob(M) && ConfigHelper.ConfigHasValue(ESMConfig.DuplicatedMobs, M, false)) {
          for (int i = 0; i < Count; i++) {
             cloneMob(M);
          }

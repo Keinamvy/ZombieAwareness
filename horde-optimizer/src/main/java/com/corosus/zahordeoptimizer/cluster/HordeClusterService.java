@@ -15,6 +15,7 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.pathfinder.Path;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -93,12 +94,7 @@ public final class HordeClusterService {
             return;
         }
 
-        boolean activeEligible = mob.isAlive()
-                && !mob.isRemoved()
-                && !mob.entityTags().contains(ZAUtil.BLOODMOON_WARDEN_TAG)
-                && !mob.entityTags().contains(ZAUtil.KNIGHT_MOUNT_TAG)
-                && !(mob.isPassenger() && mob.entityTags().contains(ZAUtil.KNIGHT_TAG))
-                && HordeMobDetector.isHordeMob(mob);
+        boolean activeEligible = isEligibleClusterMob(mob);
 
         if (!activeEligible) {
             if (mob instanceof HordeMobTickCache cache) {
@@ -231,8 +227,29 @@ public final class HordeClusterService {
         }
     }
 
+    public static boolean isExcludedFromClusterThrottling(Collection<String> tags, boolean isPassenger) {
+        if (tags == null || tags.isEmpty()) {
+            return false;
+        }
+        return tags.contains(ZAUtil.BLOODMOON_WARDEN_TAG)
+                || tags.contains(ZAUtil.KNIGHT_MOUNT_TAG)
+                || tags.contains(ZAUtil.THROWN_PROJECTILE_TAG)
+                || (isPassenger && tags.contains(ZAUtil.KNIGHT_TAG));
+    }
+
+    private static boolean isEligibleClusterMob(Mob mob) {
+        return mob != null
+                && mob.isAlive()
+                && !mob.isRemoved()
+                && !isExcludedFromClusterThrottling(mob.entityTags(), mob.isPassenger())
+                && HordeMobDetector.isHordeMob(mob);
+    }
+
     private static boolean isClusterOptimizationActive(Mob mob) {
         if (mob == null || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
+            return false;
+        }
+        if (mob.entityTags().contains(ZAUtil.THROWN_PROJECTILE_TAG)) {
             return false;
         }
         if (mob instanceof HordeMobTickCache cache && mob.level() instanceof ServerLevel level) {
@@ -240,13 +257,7 @@ public final class HordeClusterService {
                 return cache.zaho$isClusterActiveCached();
             }
         }
-        return mob.isAlive()
-                && !mob.isRemoved()
-                && mob.level() instanceof ServerLevel
-                && !mob.entityTags().contains(ZAUtil.BLOODMOON_WARDEN_TAG)
-                && !mob.entityTags().contains(ZAUtil.KNIGHT_MOUNT_TAG)
-                && !(mob.isPassenger() && mob.entityTags().contains(ZAUtil.KNIGHT_TAG))
-                && HordeMobDetector.isHordeMob(mob);
+        return mob.level() instanceof ServerLevel && isEligibleClusterMob(mob);
     }
 
     private static boolean isCloseToTarget(Mob mob) {
@@ -260,6 +271,9 @@ public final class HordeClusterService {
 
     public static boolean shouldThrottleGoalSelector(Mob mob) {
         if (mob == null || mob.tickCount <= 2 || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
+            return false;
+        }
+        if (mob.entityTags().contains(ZAUtil.THROWN_PROJECTILE_TAG)) {
             return false;
         }
         if (!(mob.level() instanceof ServerLevel level)) {
@@ -293,6 +307,9 @@ public final class HordeClusterService {
         if (mob == null || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
             return false;
         }
+        if (mob.entityTags().contains(ZAUtil.THROWN_PROJECTILE_TAG)) {
+            return false;
+        }
         if (!(mob.level() instanceof ServerLevel level)) {
             return false;
         }
@@ -322,6 +339,9 @@ public final class HordeClusterService {
 
     public static boolean shouldThrottleZombieAwarenessAI(Mob mob) {
         if (mob == null || !HordeOptimizerConfig.enabled || !HordeOptimizerConfig.enableClusterOptimization) {
+            return false;
+        }
+        if (mob.entityTags().contains(ZAUtil.THROWN_PROJECTILE_TAG)) {
             return false;
         }
         if (!(mob.level() instanceof ServerLevel level)) {

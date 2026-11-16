@@ -6,9 +6,12 @@ import com.nll.nightmareesm.Base.NightmareZombie;
 import com.nll.nightmareesm.MobBehavs.CreeperBreachWalls;
 import com.nll.nightmareesm.MobBehavs.MobBloodlust;
 import com.nll.nightmareesm.MobBehavs.MobBreakLightSources;
+import com.nll.nightmareesm.MobBehavs.MobBuildBridge;
+import com.nll.nightmareesm.MobBehavs.MobBuildUp;
 import com.nll.nightmareesm.MobBehavs.MobDig;
 import com.nll.nightmareesm.MobBehavs.MobDigDown;
 import com.nll.nightmareesm.MobBehavs.MobDigUp;
+import com.nll.nightmareesm.MobBehavs.MobPlaceBlock;
 import com.nll.nightmareesm.MobBehavs.MobPlaceTNT;
 import com.nll.nightmareesm.MobBehavs.MobScreamerAlert;
 import com.nll.nightmareesm.MobBehavs.MobStartFires;
@@ -54,6 +57,7 @@ public final class nightmareesm implements ModInitializer {
          MobScreamerAlert.resetLastGlobalScreamTick();
          MobPlaceTNT.clearCooldowns();
          CreeperBreachWalls.clearTickMap();
+         MobPlaceBlock.clearAll();
       });
       ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
          if (currentServer == server) {
@@ -62,6 +66,7 @@ public final class nightmareesm implements ModInitializer {
          MobScreamerAlert.resetLastGlobalScreamTick();
          MobPlaceTNT.clearCooldowns();
          CreeperBreachWalls.clearTickMap();
+         MobPlaceBlock.clearAll();
       });
       init();
       LOGGER.info("Epic Siege Mod - Arming (Fabric 26.3)!");
@@ -92,9 +97,7 @@ public final class nightmareesm implements ModInitializer {
          case "SCREAMER_SCOUT":
             return stageNumber >= 7;
          case "BRIDGE_PILLAR":
-            // Isolated Zombie Build ability: disabled per design, retained in MobBuildBridge/MobBuildUp/MobPlaceBlock.
-            // To re-enable at Stage 8+, change to: return stageNumber >= 8;
-            return false;
+            return stageNumber >= 3;
          case "JUGGERNAUT_CRAWLER":
             return stageNumber >= 9;
          case "TNT_SAPPER":
@@ -119,7 +122,11 @@ public final class nightmareesm implements ModInitializer {
          }
          Level Lvl = MobInfo.GetMobLevel(Entity_Mob);
          if (Lvl != null && !Lvl.isClientSide() && isTick(Entity_Mob)
-               && (Entity_Mob.entityTags().contains("za_horde_mob") || Entity_Mob.entityTags().contains("za_tnt_sapper") || isBloodmoon || isSiegeDay(Entity_Mob))) {
+               && (Entity_Mob.entityTags().contains("za_horde_mob")
+                  || Entity_Mob.entityTags().contains("za_engineer")
+                  || Entity_Mob.entityTags().contains("za_tnt_sapper")
+                  || isBloodmoon
+                  || isSiegeDay(Entity_Mob))) {
             MobTargetPlayer.tickTarget(Entity_Class, isBloodmoon);
 
             if (Entity_Class instanceof Creeper C) {
@@ -173,21 +180,11 @@ public final class nightmareesm implements ModInitializer {
                   }
                }
 
-               /*
-                * =====================================================================================
-                * ISOLATED ZOMBIE BUILD ABILITY (Bridging & Vertical Pillaring)
-                * -------------------------------------------------------------------------------------
-                * Preserved for future re-enablement. To re-enable:
-                *   1. Enable "BRIDGE_PILLAR" in canUseBehaviorForStage(String, int) (e.g. stage >= 8)
-                *   2. Set ESMConfig.AllowZombieBuilding ("iszombiebuilding") to true
-                *   3. Uncomment the block below:
-                *
-                * if (canUseBehaviorForStage("BRIDGE_PILLAR", currentStage) && (Boolean)ESMConfig.AllowZombieBuilding.get()) {
-                *    new com.nll.nightmareesm.MobBehavs.MobBuildBridge(zombie);
-                *    new com.nll.nightmareesm.MobBehavs.MobBuildUp(zombie);
-                * }
-                * =====================================================================================
-                */
+               if (zombie.entityTags().contains("za_engineer") && canUseBehaviorForStage("BRIDGE_PILLAR", currentStage)) {
+                  if (!MobBuildUp.tryBuildUp(zombie)) {
+                     MobBuildBridge.tryBridge(zombie);
+                  }
+               }
 
                if (canUseBehaviorForStage("TNT_SAPPER", currentStage) && (Boolean)ESMConfig.ZombiesLayTNT.get()) {
                   MobPlaceTNT.tryPlace(Entity_Class);
@@ -242,6 +239,31 @@ public final class nightmareesm implements ModInitializer {
          && spawnReason != EntitySpawnReason.STRUCTURE;
    }
 
+   /**
+    * Horde-only restriction: normal wild mobs never trigger clone spawning during finalizeSpawn.
+    */
+   public static boolean canDuplicateOnFinalizeSpawn(
+         EntitySpawnReason spawnReason,
+         boolean isLiveServerLevel,
+         boolean isServerThread,
+         boolean isHordeMob) {
+      return isHordeMob && canDuplicateOnFinalizeSpawn(spawnReason, isLiveServerLevel, isServerThread);
+   }
+
+   public static int computeScreamerRollPercent(int currentStage) {
+      if (currentStage < 7) {
+         return 0;
+      }
+      return Math.max(1, (int) Math.round(8.0D * com.corosus.zombieawareness.heat.ChunkHeatManager.computeStageEliteSpawnMultiplier(currentStage)));
+   }
+
+   public static int computeJuggernautRollPercent(int currentStage) {
+      if (currentStage < 9) {
+         return 0;
+      }
+      return Math.max(1, (int) Math.round(12.0D * com.corosus.zombieawareness.heat.ChunkHeatManager.computeStageEliteSpawnMultiplier(currentStage)));
+   }
+
    public static boolean isSafeLiveServerFinalizeSpawn(Level lvl, boolean isLiveServerLevel) {
       if (!isLiveServerLevel || !(lvl instanceof net.minecraft.server.level.ServerLevel serverLvl)) {
          return false;
@@ -260,14 +282,16 @@ public final class nightmareesm implements ModInitializer {
                boolean allowPickaxe = canUseBehaviorForStage("PICKAXE_DIG", currentStage);
                NightmareZombie.apply(z, allowPickaxe);
 
-               if (canRollAsScreamer(Spawn_Reason, currentStage)) {
-                  if (RNG.getInt(0, 100) < 8) {
+               int screamerPct = computeScreamerRollPercent(currentStage);
+               if (canRollAsScreamer(Spawn_Reason, currentStage) && screamerPct > 0) {
+                  if (RNG.getInt(0, 100) < screamerPct) {
                      makeScreamer(z);
                   }
                }
 
-               if (canUseBehaviorForStage("JUGGERNAUT_CRAWLER", currentStage)) {
-                  if (RNG.getInt(0, 100) < 12) {
+               int juggPct = computeJuggernautRollPercent(currentStage);
+               if (canUseBehaviorForStage("JUGGERNAUT_CRAWLER", currentStage) && juggPct > 0) {
+                  if (RNG.getInt(0, 100) < juggPct) {
                      applyJuggernautLoadout(z);
                   }
                }
@@ -281,7 +305,8 @@ public final class nightmareesm implements ModInitializer {
                NightmareSkeleton.apply(M);
             }
 
-            if ((Boolean)ESMConfig.Entity_Duplication.get()) {
+            boolean isHordeMob = com.corosus.zombieawareness.ZAUtil.isHordeMob(M);
+            if ((Boolean)ESMConfig.Entity_Duplication.get() && isHordeMob) {
                int MaxDupes = (Integer)ESMConfig.MaxDuplicationClones.get();
                int MinDupes = (Integer)ESMConfig.MinDuplicationClones.get();
                if (MinDupes > MaxDupes) {
@@ -292,7 +317,7 @@ public final class nightmareesm implements ModInitializer {
                   && serverLvl.getServer() != null
                   && serverLvl.getServer().isSameThread();
 
-               if (canDuplicateOnFinalizeSpawn(Spawn_Reason, isLiveServerLevel, isServerThread)) {
+               if (canDuplicateOnFinalizeSpawn(Spawn_Reason, isLiveServerLevel, isServerThread, true)) {
                   int TotalDupes = RNG.getInt(MinDupes, MaxDupes + 1);
                   if (nightmareesm.ShouldDuplicate()) {
                      DuplicateMob.duplicate(M, TotalDupes);

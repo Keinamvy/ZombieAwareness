@@ -4,7 +4,9 @@ import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.ZombieAwareness;
 import com.corosus.zombieawareness.config.ZAConfigGeneral;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
@@ -27,6 +29,12 @@ public abstract class MixinLivingEntity {
     @Unique
     private boolean za$processingApexBypass = false;
 
+    @Unique
+    private long za$clutchInvulUntilTick = -1L;
+
+    @Unique
+    private boolean za$adrenalineKillHandled = false;
+
     @Inject(method = "tick",
             at = @At(value = "HEAD"), cancellable = true)
     public void hook(CallbackInfo ci) {
@@ -48,6 +56,26 @@ public abstract class MixinLivingEntity {
     @Inject(method = "hurtServer", at = @At("HEAD"), cancellable = true)
     public void za$blockHostileFriendlyFire(ServerLevel level, DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
         Entity victim = (Entity)(Object)this;
+        if (source.is(DamageTypes.FALL) && victim.entityTags().contains(ZAUtil.THROWN_PROJECTILE_TAG)) {
+            victim.removeTag(ZAUtil.THROWN_PROJECTILE_TAG);
+            victim.addTag(ZAUtil.THROWN_LANDED_TAG);
+            cir.setReturnValue(false);
+            return;
+        }
+
+        if (victim instanceof ServerPlayer serverPlayer && !za$processingApexBypass) {
+            long gameTime = level.getGameTime();
+            if (!ZAUtil.isClutchBypassDamage(source) && za$clutchInvulUntilTick > gameTime) {
+                cir.setReturnValue(false);
+                return;
+            }
+            if (ZAUtil.tryTriggerOneHeartClutch(serverPlayer, amount, source, gameTime)) {
+                za$clutchInvulUntilTick = gameTime + ZAUtil.ONE_HEART_CLUTCH_INVUL_TICKS;
+                cir.setReturnValue(false);
+                return;
+            }
+        }
+
         Entity attacker = source.getEntity();
         Entity directEntity = source.getDirectEntity();
 
@@ -131,8 +159,13 @@ public abstract class MixinLivingEntity {
     public void za$onEntityDie(DamageSource source, CallbackInfo ci) {
         LivingEntity self = (LivingEntity)(Object)this;
         if (!self.level().isClientSide() && self.level() instanceof ServerLevel serverLevel) {
-            if (self instanceof net.minecraft.server.level.ServerPlayer sp) {
+            if (self instanceof ServerPlayer sp) {
+                za$clutchInvulUntilTick = -1L;
                 com.corosus.zombieawareness.heat.ChunkHeatManager.onPlayerDeath(serverLevel, sp.getUUID(), sp.blockPosition(), serverLevel.getGameTime());
+            }
+            if (!za$adrenalineKillHandled && !self.isRemoved()) {
+                za$adrenalineKillHandled = true;
+                ZAUtil.tryApplyAdrenalineLifeOnKill(serverLevel, self, source);
             }
             if (ZAUtil.isHostileMob(self)) {
                 ZAUtil.trySpawnMonsterDistressScent(serverLevel, self, com.corosus.zombieawareness.zday.ZDayProgressionManager.getCurrentStage().getStageNumber());
@@ -143,8 +176,15 @@ public abstract class MixinLivingEntity {
     @Inject(method = "dropAllDeathLoot", at = @At("HEAD"), cancellable = true)
     private void za$reduceHordeMobLootDrops(ServerLevel level, DamageSource damageSource, CallbackInfo ci) {
         LivingEntity self = (LivingEntity)(Object)this;
-        boolean isHordeMob = self.entityTags().contains("za_horde_mob");
-        if (isHordeMob && !ZAUtil.shouldHordeMobDropLoot(true, level.getRandom().nextFloat())) {
+        boolean isElite = ZAUtil.isEliteHordeMob(self);
+        boolean isHordeMob = self.entityTags().contains("za_horde_mob") || ZAUtil.isHordeMob(self);
+        boolean isDamageClone = self.entityTags().contains(ZAUtil.DAMAGE_CLONE_TAG);
+        if (isElite) {
+            ZAUtil.dropEliteMineralLoot(level, self, damageSource);
+        } else if (isHordeMob) {
+            ZAUtil.dropNormalHordeGunpowder(level, self);
+        }
+        if (!ZAUtil.shouldHordeMobDropLoot(isHordeMob, isElite, isDamageClone, level.getRandom().nextFloat())) {
             ci.cancel();
         }
     }

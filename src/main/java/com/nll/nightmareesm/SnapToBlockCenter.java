@@ -4,21 +4,21 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 
 /**
- * Isolated Zombie Build Ability — Block Centering Helper.
+ * Siege Engineer Zombie Build Ability — Block Centering Helper.
  *
- * <p>Snaps an entity to block-aligned coordinates after stepping onto a newly placed pillar block
- * in {@link com.nll.nightmareesm.MobBehavs.MobBuildUp}.
- *
- * <p><b>Current Status:</b> Kept intact as a dependency of the isolated Zombie Build ability.
+ * <p>Snaps an entity to the center ({@code x + 0.5, y, z + 0.5}) of its current block after
+ * stepping onto a newly placed pillar block in {@link com.nll.nightmareesm.MobBehavs.MobBuildUp}.
  */
 public class SnapToBlockCenter {
    public SnapToBlockCenter(Entity Entity_Class) {
+      snap(Entity_Class);
+   }
+
+   public static void snap(Entity Entity_Class) {
+      if (Entity_Class == null) {
+         return;
+      }
       BlockPos Block_Pos = Entity_Class.blockPosition();
-      int X = Block_Pos.getX();
-      int Y = Block_Pos.getY();
-      int Z = Block_Pos.getZ();
-      double X_D = X;
-      double Z_D = Z;
-      Entity_Class.setPos(X_D, Y, Z_D);
+      Entity_Class.setPos(Block_Pos.getX() + 0.5, Block_Pos.getY(), Block_Pos.getZ() + 0.5);
    }
 }

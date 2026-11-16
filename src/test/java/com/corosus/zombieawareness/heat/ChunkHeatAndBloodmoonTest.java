@@ -49,7 +49,7 @@ public class ChunkHeatAndBloodmoonTest {
     @Test
     public void taczSuppressedAndLoudGunfireHeatAccumulation() {
         ChunkHeatManager.clearAllHeat();
-        ZDayProgressionManager.setForcedWorldDay(4); // Stage 2+ required for heat accumulation
+        ZDayProgressionManager.setForcedWorldDay(21); // Stage 2+ (Day 21+) required for heat accumulation
 
         try {
             // Verify isSuppressedTaCZSound classification
@@ -127,16 +127,16 @@ public class ChunkHeatAndBloodmoonTest {
     }
 
     @Test
-    public void bloodmoonScheduleMatchesDay8AndEvery6DaysAtNight() {
-        // Day schedule: starts at Day 8, repeats every 6 days (Day 8, 14, 20, 26, 32...)
+    public void bloodmoonScheduleMatchesDay49AndEvery6DaysAtNight() {
+        // Day schedule: starts at Day 49 (Stage 4), repeats every 6 days (Day 49, 55, 61, 67...)
         assertFalse(BloodmoonManager.isBloodmoonDay(1), "Day 1 must not be Bloodmoon");
-        assertFalse(BloodmoonManager.isBloodmoonDay(7), "Day 7 must not be Bloodmoon");
-        assertTrue(BloodmoonManager.isBloodmoonDay(8), "Day 8 must be Bloodmoon");
-        assertFalse(BloodmoonManager.isBloodmoonDay(9), "Day 9 must not be Bloodmoon");
-        assertFalse(BloodmoonManager.isBloodmoonDay(13), "Day 13 must not be Bloodmoon");
-        assertTrue(BloodmoonManager.isBloodmoonDay(14), "Day 14 must be Bloodmoon");
-        assertTrue(BloodmoonManager.isBloodmoonDay(20), "Day 20 must be Bloodmoon");
-        assertTrue(BloodmoonManager.isBloodmoonDay(26), "Day 26 must be Bloodmoon");
+        assertFalse(BloodmoonManager.isBloodmoonDay(48), "Day 48 must not be Bloodmoon");
+        assertTrue(BloodmoonManager.isBloodmoonDay(49), "Day 49 must be Bloodmoon");
+        assertFalse(BloodmoonManager.isBloodmoonDay(50), "Day 50 must not be Bloodmoon");
+        assertFalse(BloodmoonManager.isBloodmoonDay(54), "Day 54 must not be Bloodmoon");
+        assertTrue(BloodmoonManager.isBloodmoonDay(55), "Day 55 must be Bloodmoon");
+        assertTrue(BloodmoonManager.isBloodmoonDay(61), "Day 61 must be Bloodmoon");
+        assertTrue(BloodmoonManager.isBloodmoonDay(67), "Day 67 must be Bloodmoon");
 
         // Night time window: 12000 to 23500 ticks
         assertFalse(BloodmoonManager.isBloodmoonNightTime(0L), "Dawn tick 0 must not be night");
@@ -809,5 +809,32 @@ public class ChunkHeatAndBloodmoonTest {
         // 4. Phantom Aerial Passenger Safety
         assertFalse(ChunkHeatManager.checkAndDropPhantomPassenger(null, null),
                 "Null phantom and target handled safely returning false");
+    }
+
+    @Test
+    public void victoryCloseCombatRetentionAndSeventyThirtyPincerHelpersWorkCleanly() {
+        assertEquals(24.0, ChunkHeatManager.VICTORY_RETAIN_RADIUS_BLOCKS, 1e-6);
+        assertFalse(ChunkHeatManager.shouldDisperseOnVictory(0.0));
+        assertFalse(ChunkHeatManager.shouldDisperseOnVictory(24.0 * 24.0),
+                "Mobs at <= 24m must stay alive on victory for close-quarters combat");
+        assertTrue(ChunkHeatManager.shouldDisperseOnVictory(24.1 * 24.1),
+                "Mobs > 24m from nearest alive player must disperse on victory");
+
+        // 70/30 pincer ratio across indices 0..19
+        int flankCount = 0;
+        for (int i = 0; i < 20; i++) {
+            if (ChunkHeatManager.isFlankSpawnIndex(i)) {
+                flankCount++;
+            }
+        }
+        assertEquals(6, flankCount, "30% of spawns (6 out of 20) must use silent flank approach");
+
+        double front = 0.0;
+        double flankCenter = ChunkHeatManager.computeFlankApproachAngle(front, 0.0);
+        double flankMin = ChunkHeatManager.computeFlankApproachAngle(front, -1.0);
+        double flankMax = ChunkHeatManager.computeFlankApproachAngle(front, 1.0);
+        assertEquals(Math.PI, flankCenter, 1e-6);
+        assertEquals(Math.PI * 2.0 / 3.0, flankMin, 1e-6, "120 deg offset");
+        assertEquals(Math.PI * 4.0 / 3.0, flankMax, 1e-6, "240 deg offset");
     }
 }

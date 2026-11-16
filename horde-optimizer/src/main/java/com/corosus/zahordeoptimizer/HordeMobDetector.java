@@ -24,6 +24,7 @@ public final class HordeMobDetector {
             "za_apex_corrosive",
             "za_screamer",
             "za_airdrop_passenger",
+            ZAUtil.ENGINEER_TAG,
             ZAUtil.TANKER_TAG,
             ZAUtil.BLOODMOON_WARDEN_TAG,
             ZAUtil.KNIGHT_TAG,

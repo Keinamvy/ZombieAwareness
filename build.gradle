@@ -3,7 +3,40 @@ plugins {
 	id 'maven-publish'
 }
 
-version = project.mod_version
+def runGitTrimmed = { List<String> gitArgs ->
+	try {
+		def execOut = providers.exec {
+			commandLine(['git'] + gitArgs)
+			ignoreExitValue = true
+		}
+		if (execOut.result.get().exitValue == 0) {
+			def text = execOut.standardOutput.asText.get().trim()
+			return text.isEmpty() ? null : text
+		}
+	} catch (Throwable ignored) {}
+	return null
+}
+
+ext.resolveBuildVersion = { String baseVersion, boolean explicitOverride ->
+	boolean isReleaseFlag = gradle.startParameter.projectProperties.get('release')?.toString()?.equalsIgnoreCase('true') ?: false
+	if (explicitOverride || isReleaseFlag) {
+		return baseVersion
+	}
+	String exactTag = runGitTrimmed(['describe', '--tags', '--exact-match', 'HEAD'])
+	String envRef = System.getenv('GITHUB_REF') ?: ''
+	boolean onReleaseTag = (exactTag != null && (exactTag == "v${baseVersion}" || exactTag == baseVersion)) || envRef.startsWith('refs/tags/v') || envRef.startsWith('refs/tags/26.3')
+	if (onReleaseTag) {
+		return baseVersion
+	}
+	String commitCount = runGitTrimmed(['rev-list', '--count', 'HEAD'])
+	String shortSha = runGitTrimmed(['rev-parse', '--short', 'HEAD'])
+	if (commitCount != null && shortSha != null) {
+		return "${baseVersion}+build.${commitCount}.g${shortSha}"
+	}
+	return baseVersion
+}
+
+version = ext.resolveBuildVersion(project.mod_version.toString(), gradle.startParameter.projectProperties.containsKey('mod_version'))
 group = project.maven_group
 
 base {

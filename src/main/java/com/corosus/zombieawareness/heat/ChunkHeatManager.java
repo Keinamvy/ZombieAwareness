@@ -69,6 +69,7 @@ public class ChunkHeatManager {
     public static final long POST_HORDE_BREATHER_TICKS = 4200L;
     public static final long CORPSE_RUN_GRACE_TICKS = 3600L;
     public static final double GROUP_CLUSTER_RADIUS = 96.0;
+    public static final double VICTORY_RETAIN_RADIUS_BLOCKS = 24.0;
     public static final int DEFAULT_BASE_SWARM_WAVE_SIZE = 48;
     public static final int DEFAULT_HORDE_MAX_ALIVE_CAP = 180;
     public static final int DEFAULT_HORDE_BASE_DURATION_TICKS = 6000;
@@ -227,6 +228,44 @@ public class ChunkHeatManager {
 
     public static int computePhantomSpawnY(int groundSpawnY) {
         return groundSpawnY + 16;
+    }
+
+    /**
+     * Scales special/elite horde mob spawn rates cleanly across early-to-late Z-Day stages
+     * so Days 1-40 focus on frontline fodder and special units ramp smoothly afterward.
+     */
+    public static double computeStageEliteSpawnMultiplier(int worldStageNum) {
+        if (worldStageNum <= 1) return 0.0D;
+        if (worldStageNum == 2) return 0.15D;
+        if (worldStageNum == 3) return 0.30D;
+        if (worldStageNum == 4) return 0.40D;
+        if (worldStageNum == 5) return 0.55D;
+        if (worldStageNum == 6) return 0.70D;
+        if (worldStageNum == 7) return 0.80D;
+        if (worldStageNum == 8) return 0.90D;
+        return 1.0D;
+    }
+
+    public static boolean canSpawnEliteInStage(String eliteTag, int worldStageNum) {
+        if (eliteTag == null || worldStageNum <= 1) {
+            return false;
+        }
+        return switch (eliteTag) {
+            case HordeSpecialUnitHelper.TANKER_TAG, HordeSpecialUnitHelper.CRAWLER_TAG -> worldStageNum >= 2;
+            case HordeSpecialUnitHelper.ENGINEER_TAG -> worldStageNum >= 3;
+            case HordeSpecialUnitHelper.KNIGHT_TAG -> worldStageNum >= 5;
+            case "za_screamer" -> worldStageNum >= 6;
+            case HordeSpecialUnitHelper.JUGGERNAUT_TAG -> worldStageNum >= 7;
+            case HordeSpecialUnitHelper.SAPPER_TAG -> worldStageNum >= 8;
+            default -> false;
+        };
+    }
+
+    public static double computeScaledEliteChance(double baseChance, String eliteTag, int worldStageNum) {
+        if (baseChance <= 0.0D || !canSpawnEliteInStage(eliteTag, worldStageNum)) {
+            return 0.0D;
+        }
+        return Math.min(1.0D, baseChance * computeStageEliteSpawnMultiplier(worldStageNum));
     }
 
     public static void announceHordeNotice(ServerLevel overworld, ActiveHorde horde, String message, SoundEvent cueSound) {
@@ -434,6 +473,19 @@ public class ChunkHeatManager {
 
     public static double[] computeDirectionalSpawnOffset(double approachAngleRad, double normalizedAngleMinusOneToOne, double normalizedDistZeroToOne) {
         return computeSpawnOffset(approachAngleRad, normalizedAngleMinusOneToOne, normalizedDistZeroToOne, false);
+    }
+
+    public static boolean isFlankSpawnIndex(int index) {
+        return Math.floorMod(index, 10) >= 7;
+    }
+
+    public static double computeFlankApproachAngle(double frontAngleRad, double randomOffsetMinusOneToOne) {
+        double clamped = Math.max(-1.0, Math.min(1.0, randomOffsetMinusOneToOne));
+        return frontAngleRad + Math.PI + clamped * (Math.PI / 3.0);
+    }
+
+    public static boolean shouldDisperseOnVictory(double nearestPlayerDistSq) {
+        return nearestPlayerDistSq > (VICTORY_RETAIN_RADIUS_BLOCKS * VICTORY_RETAIN_RADIUS_BLOCKS);
     }
 
     public static String getCompassDirectionFromAngle(double angleRad) {
@@ -659,12 +711,87 @@ public class ChunkHeatManager {
         return true;
     }
 
+    private static void collapseEngineerBlocks(ServerLevel level) {
+        if (level == null) {
+            return;
+        }
+        try {
+            com.nll.nightmareesm.MobBehavs.MobPlaceBlock.collapseAllBlocks(level);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void tickEngineerBlockDecay(ServerLevel level, long currentTick) {
+        if (level == null) {
+            return;
+        }
+        try {
+            com.nll.nightmareesm.MobBehavs.MobPlaceBlock.tickDecay(level, currentTick);
+        } catch (Throwable ignored) {
+        }
+    }
+
     private static void completeHordeVictory(ServerLevel overworld, ActiveHorde horde, long currentTick, String message, List<ActiveHorde> toRemove) {
         toRemove.add(horde);
         markGroupPostHordeBreather(horde.targetGroupPlayerIds, currentTick);
         resetHeatAround(horde.center.getX(), horde.center.getZ(), currentTick);
-        disperseHordeMobsAround(overworld, horde.center, GROUP_CLUSTER_RADIUS, 1.0);
+        disperseDistantHordeMobsOnVictory(overworld, horde);
+        collapseEngineerBlocks(overworld);
         announceHordeVictory(overworld, horde, message);
+    }
+
+    public static int disperseDistantHordeMobsOnVictory(ServerLevel level, ActiveHorde horde) {
+        if (level == null || horde == null || horde.center == null) {
+            return 0;
+        }
+        double searchRadius = GROUP_CLUSTER_RADIUS * 1.5;
+        double searchRadiusSq = searchRadius * searchRadius;
+        double cx = horde.center.getX() + 0.5;
+        double cy = horde.center.getY() + 0.5;
+        double cz = horde.center.getZ() + 0.5;
+
+        List<ServerPlayer> alivePlayers = new ArrayList<>();
+        if (level.players() != null) {
+            for (ServerPlayer player : level.players()) {
+                if (player != null && player.isAlive() && !player.isDeadOrDying() && !player.isSpectator()) {
+                    alivePlayers.add(player);
+                }
+            }
+        }
+
+        List<Mob> mobs = level.getEntitiesOfClass(
+                Mob.class,
+                hordeSearchBox(horde.center, searchRadius),
+                m -> m != null && m.isAlive() && ZAUtil.isHordeMob(m) && m.distanceToSqr(cx, cy, cz) <= searchRadiusSq
+        );
+        if (mobs.isEmpty()) {
+            return 0;
+        }
+
+        int dispersed = 0;
+        for (Mob mob : mobs) {
+            double minDistSq;
+            if (alivePlayers.isEmpty()) {
+                minDistSq = mob.distanceToSqr(cx, cy, cz);
+            } else {
+                minDistSq = Double.MAX_VALUE;
+                for (ServerPlayer player : alivePlayers) {
+                    double dSq = mob.distanceToSqr(player);
+                    if (dSq < minDistSq) {
+                        minDistSq = dSq;
+                    }
+                }
+            }
+            if (shouldDisperseOnVictory(minDistSq)) {
+                try {
+                    level.sendParticles(ParticleTypes.SMOKE, mob.getX(), mob.getY() + 0.8, mob.getZ(), 5, 0.25, 0.4, 0.25, 0.02);
+                } catch (Throwable ignored) {
+                }
+                mob.discard();
+                dispersed++;
+            }
+        }
+        return dispersed;
     }
 
     public static int disperseHordeMobsAround(ServerLevel level, BlockPos center, double radius, double discardFraction) {
@@ -722,6 +849,7 @@ public class ChunkHeatManager {
                     if (center != null) {
                         disperseHordeMobsAround(level, center, GROUP_CLUSTER_RADIUS, 0.80);
                     }
+                    collapseEngineerBlocks(level);
                     if (level.players() != null) {
                         for (ServerPlayer player : level.players()) {
                             if (player != null && horde.originalGroupPlayerIds.contains(player.getUUID())) {
@@ -1145,6 +1273,7 @@ public class ChunkHeatManager {
         boolean isSapper = zombie.entityTags().contains("za_tnt_sapper");
         boolean isTanker = zombie.entityTags().contains(HordeSpecialUnitHelper.TANKER_TAG);
         boolean isKnight = zombie.entityTags().contains(HordeSpecialUnitHelper.KNIGHT_TAG);
+        boolean isEngineer = zombie.entityTags().contains(HordeSpecialUnitHelper.ENGINEER_TAG);
         boolean isRampage = zombie.entityTags().contains(RAMPAGE_TAG);
 
         Drowned drowned = zombie.convertTo(
@@ -1158,6 +1287,7 @@ public class ChunkHeatManager {
                 if (isSapper) d.addTag("za_tnt_sapper");
                 if (isTanker) d.addTag(HordeSpecialUnitHelper.TANKER_TAG);
                 if (isKnight) d.addTag(HordeSpecialUnitHelper.KNIGHT_TAG);
+                if (isEngineer) d.addTag(HordeSpecialUnitHelper.ENGINEER_TAG);
                 applyHordeMobHealthScaling(d);
                 if (isRampage) applyRampageBuffs(d);
                 HordeSpecialUnitHelper.applySpecialMobIndicator(d);
@@ -1329,6 +1459,84 @@ public class ChunkHeatManager {
         return recruited;
     }
 
+    private static Mob spawnStageScaledFrontZombie(
+            ServerLevel level,
+            HordePhase phase,
+            int worldStageNum,
+            double x,
+            double y,
+            double z,
+            boolean isApexPhase,
+            ThreadLocalRandom rand,
+            ServerPlayer targetPlayer) {
+        double r = rand.nextDouble();
+        double knightP = computeScaledEliteChance(0.16D, HordeSpecialUnitHelper.KNIGHT_TAG, worldStageNum);
+        double cursor = knightP;
+        if (r < cursor) {
+            HordeSpecialUnitHelper.spawnKnightCavalry(level, x, y, z, isApexPhase, targetPlayer);
+            return null;
+        }
+
+        Zombie zombie = new Zombie(level);
+        double tankerP = computeScaledEliteChance(0.20D, HordeSpecialUnitHelper.TANKER_TAG, worldStageNum);
+        cursor += tankerP;
+        if (r < cursor) {
+            HordeSpecialUnitHelper.applyTankerLoadout(zombie);
+            return zombie;
+        }
+
+        double engineerP = computeScaledEliteChance(0.16D, HordeSpecialUnitHelper.ENGINEER_TAG, worldStageNum);
+        cursor += engineerP;
+        if (r < cursor) {
+            HordeSpecialUnitHelper.applyEngineerLoadout(zombie);
+            return zombie;
+        }
+
+        double screamerP = computeScaledEliteChance(0.06D, "za_screamer", worldStageNum);
+        cursor += screamerP;
+        if (r < cursor) {
+            com.nll.nightmareesm.nightmareesm.makeScreamer(zombie);
+            return zombie;
+        }
+
+        double juggernautP = phase.ordinal() >= HordePhase.PHASE_3_JUGGERNAUTS_WITCHES.ordinal()
+                ? computeScaledEliteChance(0.14D, HordeSpecialUnitHelper.JUGGERNAUT_TAG, worldStageNum)
+                : 0.0D;
+        cursor += juggernautP;
+        if (r < cursor) {
+            com.nll.nightmareesm.nightmareesm.applyJuggernautLoadout(zombie);
+            if (isApexPhase) {
+                zombie.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+            }
+            return zombie;
+        }
+
+        double crawlerBase = (phase == HordePhase.PHASE_3_JUGGERNAUTS_WITCHES) ? 0.12D : 0.05D;
+        double crawlerP = computeScaledEliteChance(crawlerBase, HordeSpecialUnitHelper.CRAWLER_TAG, worldStageNum);
+        cursor += crawlerP;
+        if (r < cursor) {
+            zombie.addTag(HordeSpecialUnitHelper.CRAWLER_TAG);
+            zombie.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+            return zombie;
+        }
+
+        double sapperP = phase.ordinal() >= HordePhase.PHASE_4_CLIMAX_SAPPERS.ordinal()
+                ? computeScaledEliteChance(0.14D, HordeSpecialUnitHelper.SAPPER_TAG, worldStageNum)
+                : 0.0D;
+        cursor += sapperP;
+        if (r < cursor) {
+            zombie.addTag(HordeSpecialUnitHelper.SAPPER_TAG);
+            return zombie;
+        }
+
+        if (worldStageNum >= 5) {
+            new com.nll.nightmareesm.GiveRandomPickaxe(zombie);
+        } else {
+            zombie.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+        }
+        return zombie;
+    }
+
     public static void spawnPhasedSubWave(ServerLevel level, BlockPos center, HordePhase phase, int count, int worldStageNum) {
         spawnPhasedSubWave(level, center, ThreadLocalRandom.current().nextDouble() * 2.0 * Math.PI, phase, count, worldStageNum, false);
     }
@@ -1344,7 +1552,11 @@ public class ChunkHeatManager {
 
         for (int i = 0; i < count; i++) {
             float roll = rand.nextFloat();
-            boolean willBePhantom = canHordeSpawnPhantoms(phase, worldStageNum) && (roll >= 0.88f);
+            boolean isFlank = isFlankSpawnIndex(i);
+            double spawnApproachAngle = isFlank
+                    ? computeFlankApproachAngle(approachAngleRad, rand.nextDouble() * 2.0 - 1.0)
+                    : approachAngleRad;
+            boolean willBePhantom = !isFlank && canHordeSpawnPhantoms(phase, worldStageNum) && (roll >= 0.88f);
 
             double targetX = center.getX();
             double targetZ = center.getZ();
@@ -1355,7 +1567,7 @@ public class ChunkHeatManager {
                 if (attempt < 8) {
                     double normAngle = rand.nextDouble() * 2.0 - 1.0;
                     double normDist = rand.nextDouble();
-                    double[] offset = computeSpawnOffset(approachAngleRad, normAngle, normDist, surroundMode);
+                    double[] offset = computeSpawnOffset(spawnApproachAngle, normAngle, normDist, surroundMode);
                     candX = center.getX() + offset[0];
                     candZ = center.getZ() + offset[1];
                 } else {
@@ -1407,7 +1619,7 @@ public class ChunkHeatManager {
                 }
                 double normAngle = rand.nextDouble() * 2.0 - 1.0;
                 double normDist = rand.nextDouble();
-                double[] offset = computeSpawnOffset(approachAngleRad, normAngle, normDist, surroundMode);
+                double[] offset = computeSpawnOffset(spawnApproachAngle, normAngle, normDist, surroundMode);
                 targetX = center.getX() + offset[0];
                 targetZ = center.getZ() + offset[1];
                 if (!isChunkLoadedAt(level, (int) Math.floor(targetX), (int) Math.floor(targetZ))) {
@@ -1423,139 +1635,146 @@ public class ChunkHeatManager {
                     Drowned drowned = new Drowned(EntityTypes.DROWNED, level);
                     drowned.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
                     mob = drowned;
+                } else if (isFlank) {
+                    double flankRoll = rand.nextDouble();
+                    double knightChance = phase.ordinal() >= HordePhase.PHASE_2_BREACHERS_SKELETONS.ordinal()
+                            ? computeScaledEliteChance(0.35D, HordeSpecialUnitHelper.KNIGHT_TAG, worldStageNum)
+                            : 0.0D;
+                    double crawlerChance = computeScaledEliteChance(0.33D, HordeSpecialUnitHelper.CRAWLER_TAG, worldStageNum);
+                    double sapperChance = phase.ordinal() >= HordePhase.PHASE_3_JUGGERNAUTS_WITCHES.ordinal()
+                            ? computeScaledEliteChance(0.22D, HordeSpecialUnitHelper.SAPPER_TAG, worldStageNum)
+                            : 0.0D;
+                    if (flankRoll < knightChance) {
+                        HordeSpecialUnitHelper.spawnKnightCavalry(
+                                level, targetX, spawnY, targetZ, phase == HordePhase.PHASE_5_APEX_CORROSION, batchTargetPlayer);
+                        continue;
+                    } else if (flankRoll < knightChance + crawlerChance) {
+                        Zombie z = new Zombie(level);
+                        z.addTag(HordeSpecialUnitHelper.CRAWLER_TAG);
+                        z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                        mob = z;
+                    } else if (flankRoll < knightChance + crawlerChance + sapperChance) {
+                        Zombie z = new Zombie(level);
+                        z.addTag(HordeSpecialUnitHelper.SAPPER_TAG);
+                        mob = z;
+                    } else {
+                        Zombie z = new Zombie(level);
+                        z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                        mob = z;
+                    }
                 } else {
                     switch (phase) {
                         case PHASE_1A_FAST_ZOMBIES -> {
                             Zombie z = new Zombie(level);
-                            if (roll < 0.15f) {
+                            double tankerChance = computeScaledEliteChance(0.15D, HordeSpecialUnitHelper.TANKER_TAG, worldStageNum);
+                            double crawlerChance = computeScaledEliteChance(0.08D, HordeSpecialUnitHelper.CRAWLER_TAG, worldStageNum);
+                            if (roll < tankerChance) {
                                 HordeSpecialUnitHelper.applyTankerLoadout(z);
+                            } else if (roll < tankerChance + crawlerChance) {
+                                z.addTag(HordeSpecialUnitHelper.CRAWLER_TAG);
+                                z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
                             } else {
                                 z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
                             }
                             mob = z;
                         }
-                    case PHASE_1B_VENOM_SPIDERS -> {
-                        if (roll < 0.18f) {
-                            Zombie z = new Zombie(level);
-                            HordeSpecialUnitHelper.applyTankerLoadout(z);
-                            mob = z;
-                        } else if (roll < 0.65f) {
-                            Zombie z = new Zombie(level);
-                            z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
-                            mob = z;
-                        } else if (roll < 0.85f) {
-                            mob = createMobById(level, "cave_spider");
-                        } else {
-                            mob = createMobById(level, "spider");
-                        }
-                    }
-                    case PHASE_2_BREACHERS_SKELETONS -> {
-                        if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
-                            mob = createMobById(level, "phantom");
-                        } else if (roll < 0.60f) {
-                            if (roll >= 0.14f && roll < 0.26f) {
-                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, batchTargetPlayer);
-                                continue;
-                            }
-                            Zombie z = new Zombie(level);
-                            if (roll < 0.14f) {
+                        case PHASE_1B_VENOM_SPIDERS -> {
+                            double tankerChance = computeScaledEliteChance(0.18D, HordeSpecialUnitHelper.TANKER_TAG, worldStageNum);
+                            double crawlerChance = computeScaledEliteChance(0.08D, HordeSpecialUnitHelper.CRAWLER_TAG, worldStageNum);
+                            if (roll < tankerChance) {
+                                Zombie z = new Zombie(level);
                                 HordeSpecialUnitHelper.applyTankerLoadout(z);
-                            } else {
-                                new com.nll.nightmareesm.GiveRandomPickaxe(z);
-                            }
-                            mob = z;
-                        } else if (roll < 0.80f) {
-                            mob = createMobById(level, rand.nextBoolean() ? "cave_spider" : "spider");
-                        } else {
-                            mob = createMobById(level, (worldStageNum >= 8 && rand.nextBoolean()) ? "stray" : "skeleton");
-                        }
-                    }
-                    case PHASE_3_JUGGERNAUTS_WITCHES -> {
-                        if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
-                            mob = createMobById(level, "phantom");
-                        } else if (roll < 0.55f) {
-                            if (roll >= 0.15f && roll < 0.27f) {
-                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, batchTargetPlayer);
-                                continue;
-                            }
-                            Zombie z = new Zombie(level);
-                            if (roll < 0.15f) {
-                                HordeSpecialUnitHelper.applyTankerLoadout(z);
-                            } else if (rand.nextBoolean()) {
-                                com.nll.nightmareesm.nightmareesm.applyJuggernautLoadout(z);
-                            } else {
-                                z.addTag("za_crawler");
+                                mob = z;
+                            } else if (roll < tankerChance + crawlerChance) {
+                                Zombie z = new Zombie(level);
+                                z.addTag(HordeSpecialUnitHelper.CRAWLER_TAG);
                                 z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
-                            }
-                            mob = z;
-                        } else if (roll < 0.70f) {
-                            mob = createMobById(level, "cave_spider");
-                        } else if (roll < 0.90f) {
-                            mob = createMobById(level, "skeleton");
-                        } else {
-                            mob = createMobById(level, "witch");
-                        }
-                    }
-                    case PHASE_4_CLIMAX_SAPPERS -> {
-                        if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
-                            mob = createMobById(level, "phantom");
-                        } else if (roll < 0.50f) {
-                            if (roll >= 0.15f && roll < 0.27f) {
-                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, false, batchTargetPlayer);
-                                continue;
-                            }
-                            Zombie z = new Zombie(level);
-                            if (roll < 0.15f) {
-                                HordeSpecialUnitHelper.applyTankerLoadout(z);
-                            } else if (rand.nextBoolean()) {
-                                com.nll.nightmareesm.nightmareesm.applyJuggernautLoadout(z);
-                            } else {
-                                z.addTag("za_tnt_sapper");
-                            }
-                            mob = z;
-                        } else if (roll < 0.65f) {
-                            mob = createMobById(level, "cave_spider");
-                        } else if (roll < 0.80f) {
-                            mob = createMobById(level, "skeleton");
-                        } else {
-                            mob = createMobById(level, "creeper");
-                        }
-                    }
-                    case PHASE_5_APEX_CORROSION -> {
-                        if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
-                            mob = createMobById(level, "phantom");
-                        } else if (roll < 0.45f) {
-                            if (roll >= 0.14f && roll < 0.26f) {
-                                HordeSpecialUnitHelper.spawnKnightCavalry(level, targetX, spawnY, targetZ, true, batchTargetPlayer);
-                                continue;
-                            }
-                            Zombie z = new Zombie(level);
-                            if (roll < 0.14f) {
-                                HordeSpecialUnitHelper.applyTankerLoadout(z);
-                            } else if (rand.nextBoolean()) {
-                                com.nll.nightmareesm.nightmareesm.applyJuggernautLoadout(z);
+                                mob = z;
+                            } else if (roll < 0.65f) {
+                                Zombie z = new Zombie(level);
                                 z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                                mob = z;
+                            } else if (roll < 0.85f) {
+                                mob = createMobById(level, "cave_spider");
                             } else {
-                                if (rand.nextBoolean()) {
-                                    z.addTag("za_tnt_sapper");
-                                } else {
-                                    new com.nll.nightmareesm.GiveRandomPickaxe(z);
+                                mob = createMobById(level, "spider");
+                            }
+                        }
+                        case PHASE_2_BREACHERS_SKELETONS -> {
+                            if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
+                                mob = createMobById(level, "phantom");
+                            } else if (roll < 0.60f) {
+                                Mob spawned = spawnStageScaledFrontZombie(
+                                        level, phase, worldStageNum, targetX, spawnY, targetZ, false, rand, batchTargetPlayer);
+                                if (spawned == null) {
+                                    continue;
                                 }
+                                mob = spawned;
+                            } else if (roll < 0.80f) {
+                                mob = createMobById(level, rand.nextBoolean() ? "cave_spider" : "spider");
+                            } else {
+                                mob = createMobById(level, (worldStageNum >= 8 && rand.nextBoolean()) ? "stray" : "skeleton");
                             }
-                            mob = z;
-                        } else if (roll < 0.60f) {
-                            mob = createMobById(level, "cave_spider");
-                        } else if (roll < 0.80f) {
-                            mob = createMobById(level, "wither_skeleton");
-                            if (mob == null) {
+                        }
+                        case PHASE_3_JUGGERNAUTS_WITCHES -> {
+                            if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
+                                mob = createMobById(level, "phantom");
+                            } else if (roll < 0.55f) {
+                                Mob spawned = spawnStageScaledFrontZombie(
+                                        level, phase, worldStageNum, targetX, spawnY, targetZ, false, rand, batchTargetPlayer);
+                                if (spawned == null) {
+                                    continue;
+                                }
+                                mob = spawned;
+                            } else if (roll < 0.70f) {
+                                mob = createMobById(level, "cave_spider");
+                            } else if (roll < 0.90f) {
                                 mob = createMobById(level, "skeleton");
+                            } else {
+                                mob = createMobById(level, "witch");
                             }
-                        } else {
-                            mob = createMobById(level, "creeper");
+                        }
+                        case PHASE_4_CLIMAX_SAPPERS -> {
+                            if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
+                                mob = createMobById(level, "phantom");
+                            } else if (roll < 0.50f) {
+                                Mob spawned = spawnStageScaledFrontZombie(
+                                        level, phase, worldStageNum, targetX, spawnY, targetZ, false, rand, batchTargetPlayer);
+                                if (spawned == null) {
+                                    continue;
+                                }
+                                mob = spawned;
+                            } else if (roll < 0.65f) {
+                                mob = createMobById(level, "cave_spider");
+                            } else if (roll < 0.80f) {
+                                mob = createMobById(level, "skeleton");
+                            } else {
+                                mob = createMobById(level, "creeper");
+                            }
+                        }
+                        case PHASE_5_APEX_CORROSION -> {
+                            if (canHordeSpawnPhantoms(phase, worldStageNum) && roll >= 0.88f) {
+                                mob = createMobById(level, "phantom");
+                            } else if (roll < 0.45f) {
+                                Mob spawned = spawnStageScaledFrontZombie(
+                                        level, phase, worldStageNum, targetX, spawnY, targetZ, true, rand, batchTargetPlayer);
+                                if (spawned == null) {
+                                    continue;
+                                }
+                                mob = spawned;
+                            } else if (roll < 0.60f) {
+                                mob = createMobById(level, "cave_spider");
+                            } else if (roll < 0.80f) {
+                                mob = createMobById(level, "wither_skeleton");
+                                if (mob == null) {
+                                    mob = createMobById(level, "skeleton");
+                                }
+                            } else {
+                                mob = createMobById(level, "creeper");
+                            }
                         }
                     }
                 }
-            }
 
                 if (mob != null) {
                     mob.addTag("za_horde_mob");
@@ -1692,6 +1911,9 @@ public class ChunkHeatManager {
 
         if (currentTick % 1200L == 0) {
             pruneExpiredMaps(currentTick);
+        }
+        if (currentTick % 20L == 0) {
+            tickEngineerBlockDecay(overworld, currentTick);
         }
 
         // 1. Ambient Late-Game Night Horde Check (runs every 1200 ticks = 60s)
@@ -1830,6 +2052,7 @@ public class ChunkHeatManager {
                         toRemove.add(horde);
                         markGroupPostHordeBreather(horde.targetGroupPlayerIds, currentTick);
                         resetHeatAround(horde.center.getX(), horde.center.getZ(), currentTick);
+                        collapseEngineerBlocks(overworld);
                         continue;
                     }
                 }
@@ -1843,6 +2066,7 @@ public class ChunkHeatManager {
                     if (horde.noTargetTicks >= 100) {
                         toRemove.add(horde);
                         resetHeatAround(horde.center.getX(), horde.center.getZ(), currentTick);
+                        collapseEngineerBlocks(overworld);
                         continue;
                     }
                 }
@@ -2043,17 +2267,26 @@ public class ChunkHeatManager {
         if (activeHordes.isEmpty()
                 && !hasRecentlySeenSpecialUnitsOrTurrets
                 && !HordeSpecialUnitHelper.hasActiveWardenStates()
+                && !HordeSpecialUnitHelper.hasArmedThrownSapperStates()
                 && currentTick % 40L != 0L) {
             return;
         }
         List<Mob> turrets = null;
         List<Mob> tankers = null;
         List<Mob> wardens = null;
+        List<Zombie> juggernauts = null;
+        List<Mob> thrownSappers = null;
         boolean foundAnySpecialOrTurret = false;
 
         for (Entity e : overworld.getAllEntities()) {
             if (!(e instanceof Mob m) || !m.isAlive() || m.isRemoved()) {
                 continue;
+            }
+            if (m.entityTags().contains(HordeSpecialUnitHelper.SAPPER_FUSE_TAG)
+                    || HordeSpecialUnitHelper.isArmedThrownSapper(m.getUUID())) {
+                foundAnySpecialOrTurret = true;
+                if (thrownSappers == null) thrownSappers = new ArrayList<>();
+                thrownSappers.add(m);
             }
             if (HordeSpecialUnitHelper.isTaczTurretEntity(m)) {
                 foundAnySpecialOrTurret = true;
@@ -2072,6 +2305,10 @@ public class ChunkHeatManager {
                 if (currentTick % 20L == 0) {
                     HordeSpecialUnitHelper.ensureKnightResistanceEffect(z);
                 }
+            } else if (m instanceof Zombie z && HordeSpecialUnitHelper.isJuggernautZombie(z)) {
+                foundAnySpecialOrTurret = true;
+                if (juggernauts == null) juggernauts = new ArrayList<>();
+                juggernauts.add(z);
             } else if (HordeSpecialUnitHelper.isKnightMount(m)) {
                 foundAnySpecialOrTurret = true;
                 HordeSpecialUnitHelper.steerKnightMountToRiderTarget(m);
@@ -2083,11 +2320,19 @@ public class ChunkHeatManager {
         }
         hasRecentlySeenSpecialUnitsOrTurrets = foundAnySpecialOrTurret;
 
+        List<Mob> turretList = turrets != null ? turrets : Collections.emptyList();
         if (currentTick % 5L == 0 && turrets != null && tankers != null) {
             HordeSpecialUnitHelper.tickTurretFocus(turrets, tankers);
         }
+        if (juggernauts != null) {
+            for (Zombie juggernaut : juggernauts) {
+                HordeSpecialUnitHelper.tickJuggernautThrower(overworld, juggernaut, turretList, currentTick);
+            }
+        }
+        if (thrownSappers != null) {
+            HordeSpecialUnitHelper.tickThrownSappers(overworld, thrownSappers);
+        }
         if (wardens != null) {
-            List<Mob> turretList = turrets != null ? turrets : Collections.emptyList();
             for (Mob warden : wardens) {
                 ServerPlayer fallbackPlayer = resolveHordeTargetPlayer(warden);
                 HordeSpecialUnitHelper.tickBloodmoonWarden(overworld, warden, turretList, fallbackPlayer);

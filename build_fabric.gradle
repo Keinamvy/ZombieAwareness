@@ -3,7 +3,7 @@ plugins {
 	id 'maven-publish'
 }
 
-version = project.mod_version
+version = ext.has('resolveBuildVersion') ? ext.resolveBuildVersion(project.mod_version.toString(), gradle.startParameter.projectProperties.containsKey('mod_version')) : project.mod_version
 group = project.maven_group
 
 base {

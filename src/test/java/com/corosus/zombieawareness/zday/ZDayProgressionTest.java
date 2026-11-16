@@ -47,37 +47,37 @@ public class ZDayProgressionTest {
 
     @Test
     void stageUnlockScheduleMatchesSpec() {
-        // Milestone unlock days from design spec
+        // 100-day milestone unlock schedule (Stages 1 & 2 span Days 1-40)
         assertEquals(ZDayStage.STAGE_1_OUTBREAK, ZDayStage.getStageForDay(1));
-        assertEquals(ZDayStage.STAGE_1_OUTBREAK, ZDayStage.getStageForDay(2));
-        assertEquals(ZDayStage.STAGE_1_OUTBREAK, ZDayStage.getStageForDay(3));
+        assertEquals(ZDayStage.STAGE_1_OUTBREAK, ZDayStage.getStageForDay(10));
+        assertEquals(ZDayStage.STAGE_1_OUTBREAK, ZDayStage.getStageForDay(20));
 
-        assertEquals(ZDayStage.STAGE_2_TACZ_ACOUSTIC, ZDayStage.getStageForDay(4));
-        assertEquals(ZDayStage.STAGE_2_TACZ_ACOUSTIC, ZDayStage.getStageForDay(5));
+        assertEquals(ZDayStage.STAGE_2_TACZ_ACOUSTIC, ZDayStage.getStageForDay(21));
+        assertEquals(ZDayStage.STAGE_2_TACZ_ACOUSTIC, ZDayStage.getStageForDay(40));
 
-        assertEquals(ZDayStage.STAGE_3_BLACKOUT_STALKERS, ZDayStage.getStageForDay(6));
-        assertEquals(ZDayStage.STAGE_3_BLACKOUT_STALKERS, ZDayStage.getStageForDay(7));
+        assertEquals(ZDayStage.STAGE_3_BLACKOUT_STALKERS, ZDayStage.getStageForDay(41));
+        assertEquals(ZDayStage.STAGE_3_BLACKOUT_STALKERS, ZDayStage.getStageForDay(48));
 
-        assertEquals(ZDayStage.STAGE_4_BLOODMOON, ZDayStage.getStageForDay(8));
-        assertEquals(ZDayStage.STAGE_4_BLOODMOON, ZDayStage.getStageForDay(10));
+        assertEquals(ZDayStage.STAGE_4_BLOODMOON, ZDayStage.getStageForDay(49));
+        assertEquals(ZDayStage.STAGE_4_BLOODMOON, ZDayStage.getStageForDay(56));
 
-        assertEquals(ZDayStage.STAGE_5_PICKAXE_BREACHERS, ZDayStage.getStageForDay(11));
-        assertEquals(ZDayStage.STAGE_5_PICKAXE_BREACHERS, ZDayStage.getStageForDay(13));
+        assertEquals(ZDayStage.STAGE_5_PICKAXE_BREACHERS, ZDayStage.getStageForDay(57));
+        assertEquals(ZDayStage.STAGE_5_PICKAXE_BREACHERS, ZDayStage.getStageForDay(64));
 
-        assertEquals(ZDayStage.STAGE_6_WEBS_AND_SPRINTERS, ZDayStage.getStageForDay(14));
-        assertEquals(ZDayStage.STAGE_6_WEBS_AND_SPRINTERS, ZDayStage.getStageForDay(17));
+        assertEquals(ZDayStage.STAGE_6_WEBS_AND_SPRINTERS, ZDayStage.getStageForDay(65));
+        assertEquals(ZDayStage.STAGE_6_WEBS_AND_SPRINTERS, ZDayStage.getStageForDay(72));
 
-        assertEquals(ZDayStage.STAGE_7_SCREAMER_SCOUTS, ZDayStage.getStageForDay(18));
-        assertEquals(ZDayStage.STAGE_7_SCREAMER_SCOUTS, ZDayStage.getStageForDay(21));
+        assertEquals(ZDayStage.STAGE_7_SCREAMER_SCOUTS, ZDayStage.getStageForDay(73));
+        assertEquals(ZDayStage.STAGE_7_SCREAMER_SCOUTS, ZDayStage.getStageForDay(81));
 
-        assertEquals(ZDayStage.STAGE_8_COMBAT_ENGINEERS, ZDayStage.getStageForDay(22));
-        assertEquals(ZDayStage.STAGE_8_COMBAT_ENGINEERS, ZDayStage.getStageForDay(25));
+        assertEquals(ZDayStage.STAGE_8_COMBAT_ENGINEERS, ZDayStage.getStageForDay(82));
+        assertEquals(ZDayStage.STAGE_8_COMBAT_ENGINEERS, ZDayStage.getStageForDay(90));
 
-        assertEquals(ZDayStage.STAGE_9_JUGGERNAUTS_AND_CRAWLERS, ZDayStage.getStageForDay(26));
-        assertEquals(ZDayStage.STAGE_9_JUGGERNAUTS_AND_CRAWLERS, ZDayStage.getStageForDay(29));
+        assertEquals(ZDayStage.STAGE_9_JUGGERNAUTS_AND_CRAWLERS, ZDayStage.getStageForDay(91));
+        assertEquals(ZDayStage.STAGE_9_JUGGERNAUTS_AND_CRAWLERS, ZDayStage.getStageForDay(99));
 
-        assertEquals(ZDayStage.STAGE_10_TOTAL_COLLAPSE, ZDayStage.getStageForDay(30));
         assertEquals(ZDayStage.STAGE_10_TOTAL_COLLAPSE, ZDayStage.getStageForDay(100));
+        assertEquals(ZDayStage.STAGE_10_TOTAL_COLLAPSE, ZDayStage.getStageForDay(150));
     }
 
     @Test
@@ -90,8 +90,8 @@ public class ZDayProgressionTest {
         assertEquals(1, ledger.getPlayerLastSeenStage(playerUuid, 1));
         assertEquals(1, ledger.getPlayerLastSeenDay(playerUuid, 1));
 
-        // Player joins on Day 11 (Stage 5 Pickaxe Breachers)
-        List<ZDayStage> missedStages = ledger.getCatchUpStagesAndMarkSeen(playerUuid, 11, 5);
+        // Player joins on Day 57 (Stage 5 Pickaxe Breachers)
+        List<ZDayStage> missedStages = ledger.getCatchUpStagesAndMarkSeen(playerUuid, 57, 5);
         assertEquals(4, missedStages.size(), "Player must receive 4 missed stages (Stages 2, 3, 4, 5)");
         assertEquals(List.of(
             ZDayStage.STAGE_2_TACZ_ACOUSTIC,
@@ -101,7 +101,7 @@ public class ZDayProgressionTest {
         ), missedStages);
 
         // Immediate subsequent query at Stage 5 returns empty list (already marked seen)
-        List<ZDayStage> repeatQuery = ledger.getCatchUpStagesAndMarkSeen(playerUuid, 11, 5);
+        List<ZDayStage> repeatQuery = ledger.getCatchUpStagesAndMarkSeen(playerUuid, 57, 5);
         assertTrue(repeatQuery.isEmpty(), "Subsequent catch-up query at the same stage must be empty");
 
         // Verify persistence to JSON file
@@ -111,7 +111,7 @@ public class ZDayProgressionTest {
 
         ZDayPlayerLedger reloaded = ZDayPlayerLedger.load(file);
         assertEquals(5, reloaded.getPlayerLastSeenStage(playerUuid, 1));
-        assertEquals(11, reloaded.getPlayerLastSeenDay(playerUuid, 1));
+        assertEquals(57, reloaded.getPlayerLastSeenDay(playerUuid, 1));
     }
 
     @Test
@@ -121,9 +121,9 @@ public class ZDayProgressionTest {
         assertTrue(ZDayProgressionManager.isStageUnlocked(1));
         assertFalse(ZDayProgressionManager.isStageUnlocked(2));
 
-        // Force World Day 8 (Bloodmoon)
-        ZDayProgressionManager.setForcedWorldDay(8);
-        assertEquals(8, ZDayProgressionManager.getActiveWorldDay());
+        // Force World Day 49 (Bloodmoon)
+        ZDayProgressionManager.setForcedWorldDay(49);
+        assertEquals(49, ZDayProgressionManager.getActiveWorldDay());
         assertEquals(ZDayStage.STAGE_4_BLOODMOON, ZDayProgressionManager.getCurrentStage());
         assertTrue(ZDayProgressionManager.isStageUnlocked(1));
         assertTrue(ZDayProgressionManager.isStageUnlocked(2));
@@ -142,8 +142,8 @@ public class ZDayProgressionTest {
         // Record at stage 1
         ZDayProgressionManager.getLedger().recordPlayerSeen(playerUuid, 1, 1);
 
-        // Force World Day 11 (Stage 5)
-        ZDayProgressionManager.setForcedWorldDay(11);
+        // Force World Day 57 (Stage 5)
+        ZDayProgressionManager.setForcedWorldDay(57);
         List<String> report = ZDayProgressionManager.buildCatchUpReportLines(playerUuid);
 
         assertNotNull(report);

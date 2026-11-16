@@ -4,6 +4,7 @@ import com.corosus.coroutil.util.CoroUtilAttributes;
 import com.corosus.coroutil.util.CoroUtilPath;
 import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.ZombieAwareness;
+import com.corosus.zombieawareness.config.ZAConfigZDay;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -13,7 +14,9 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
@@ -36,6 +39,8 @@ import net.minecraft.world.entity.monster.warden.WardenAi;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 import java.lang.reflect.Method;
@@ -59,6 +64,13 @@ public final class HordeSpecialUnitHelper {
     public static final String BLOODMOON_WARDEN_TAG = ZAUtil.BLOODMOON_WARDEN_TAG;
     public static final String KNIGHT_TAG = ZAUtil.KNIGHT_TAG;
     public static final String KNIGHT_MOUNT_TAG = ZAUtil.KNIGHT_MOUNT_TAG;
+    public static final String ENGINEER_TAG = "za_engineer";
+    public static final String JUGGERNAUT_TAG = "za_juggernaut";
+    public static final String CRAWLER_TAG = "za_crawler";
+    public static final String SAPPER_TAG = "za_tnt_sapper";
+    public static final String THROWN_PROJECTILE_TAG = "za_thrown_projectile";
+    public static final String THROWN_LANDED_TAG = "za_thrown_landed";
+    public static final String SAPPER_FUSE_TAG = "za_sapper_fuse";
     public static final String LABELED_MOB_TAG = ZAUtil.LABELED_MOB_TAG;
     public static final String TACZ_TURRETS_NAMESPACE = "tacz_turrets";
 
@@ -76,13 +88,21 @@ public final class HordeSpecialUnitHelper {
     public static final double KNIGHT_MOUNT_MAX_HEALTH = 30.0D;
     public static final double KNIGHT_MOUNT_SPEED = 0.30D;
 
+    public static final double ENGINEER_SCALE = 1.05D;
     public static final double JUGGERNAUT_SCALE = 1.20D;
     public static final double CRAWLER_SCALE = 0.75D;
     public static final double SCREAMER_SCALE = 1.05D;
     public static final double WARDEN_SCALE = 1.15D;
 
+    public static final int DEFAULT_JUGGERNAUT_THROW_INTERVAL_TICKS = 200;
+    public static final double DEFAULT_JUGGERNAUT_THROW_MIN_RANGE = 8.0D;
+    public static final double DEFAULT_JUGGERNAUT_THROW_MAX_RANGE = 28.0D;
+    public static final double JUGGERNAUT_AMMO_GRAB_RADIUS = 5.0D;
+    public static final int DEFAULT_THROWN_SAPPER_FUSE_TICKS = 50;
+
     public static final String TANKER_LABEL = "§b§l[TANKER]";
     public static final String KNIGHT_LABEL = "§6§l[KNIGHT]";
+    public static final String ENGINEER_LABEL = "§3§l[ENGINEER]";
     public static final String JUGGERNAUT_LABEL = "§4§l[JUGGERNAUT]";
     public static final String CRAWLER_LABEL = "§e§l[CRAWLER]";
     public static final String SCREAMER_LABEL = "§d§l[SCREAMER]";
@@ -113,6 +133,16 @@ public final class HordeSpecialUnitHelper {
         UUID activeTargetId = null;
     }
 
+    public static final class ThrownSapperFuseState {
+        public volatile boolean landed = false;
+        public volatile int remainingFuseTicks;
+        public volatile int airborneTicks = 0;
+
+        public ThrownSapperFuseState(int remainingFuseTicks) {
+            this.remainingFuseTicks = Math.max(1, remainingFuseTicks);
+        }
+    }
+
     private static final class TurretMethodHandles {
         final Method alertToMethod;
         final Method isEnabledMethod;
@@ -138,6 +168,8 @@ public final class HordeSpecialUnitHelper {
     }
 
     private static final Map<UUID, WardenSonicState> WARDEN_SONIC_STATES = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> JUGGERNAUT_LAST_THROW_TICK = new ConcurrentHashMap<>();
+    private static final Map<UUID, ThrownSapperFuseState> ARMED_THROWN_SAPPERS = new ConcurrentHashMap<>();
     private static final Map<Class<?>, TurretMethodHandles> TURRET_METHOD_CACHE = new ConcurrentHashMap<>();
     private static final Map<EntityType<?>, Boolean> TURRET_TYPE_CACHE = new ConcurrentHashMap<>();
     private static final boolean TACZ_TURRETS_LOADED = detectTaczTurretsLoaded();
@@ -162,13 +194,25 @@ public final class HordeSpecialUnitHelper {
         return !WARDEN_SONIC_STATES.isEmpty();
     }
 
-    public static void clearAllState() {
-        WARDEN_SONIC_STATES.clear();
+    public static boolean hasArmedThrownSapperStates() {
+        return !ARMED_THROWN_SAPPERS.isEmpty();
     }
 
-    public static void removeWardenState(UUID wardenId) {
-        if (wardenId != null) {
-            WARDEN_SONIC_STATES.remove(wardenId);
+    public static boolean isArmedThrownSapper(UUID entityId) {
+        return entityId != null && ARMED_THROWN_SAPPERS.containsKey(entityId);
+    }
+
+    public static void clearAllState() {
+        WARDEN_SONIC_STATES.clear();
+        JUGGERNAUT_LAST_THROW_TICK.clear();
+        ARMED_THROWN_SAPPERS.clear();
+    }
+
+    public static void removeWardenState(UUID entityId) {
+        if (entityId != null) {
+            WARDEN_SONIC_STATES.remove(entityId);
+            JUGGERNAUT_LAST_THROW_TICK.remove(entityId);
+            ARMED_THROWN_SAPPERS.remove(entityId);
         }
     }
 
@@ -186,6 +230,14 @@ public final class HordeSpecialUnitHelper {
 
     public static boolean isKnightMount(Entity entity) {
         return entity != null && entity.entityTags().contains(KNIGHT_MOUNT_TAG);
+    }
+
+    public static boolean isEngineerZombie(Entity entity) {
+        return entity != null && entity.entityTags().contains(ENGINEER_TAG);
+    }
+
+    public static boolean isJuggernautZombie(Entity entity) {
+        return entity != null && entity.entityTags().contains(JUGGERNAUT_TAG);
     }
 
     public static boolean isZASpecialLabeledMob(Entity entity) {
@@ -218,7 +270,10 @@ public final class HordeSpecialUnitHelper {
         if (tags.contains(KNIGHT_TAG)) {
             return KNIGHT_LABEL;
         }
-        if (tags.contains("za_juggernaut")) {
+        if (tags.contains(ENGINEER_TAG)) {
+            return ENGINEER_LABEL;
+        }
+        if (tags.contains(JUGGERNAUT_TAG)) {
             return JUGGERNAUT_LABEL;
         }
         if (tags.contains("za_tnt_sapper")) {
@@ -251,6 +306,9 @@ public final class HordeSpecialUnitHelper {
         }
         if (tags.contains(KNIGHT_TAG)) {
             return KNIGHT_SCALE;
+        }
+        if (tags.contains(ENGINEER_TAG)) {
+            return ENGINEER_SCALE;
         }
         if (tags.contains("za_screamer")) {
             return SCREAMER_SCALE;
@@ -314,7 +372,37 @@ public final class HordeSpecialUnitHelper {
             if (mob.getMainHandItem().isEmpty()) {
                 mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_SPEAR));
             }
+        } else if (tags.contains(ENGINEER_TAG)) {
+            if (mob.getMainHandItem().isEmpty()) {
+                mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_PICKAXE));
+            }
+            if (mob.getOffhandItem().isEmpty()) {
+                mob.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.COARSE_DIRT));
+            }
+            if (mob.getItemBySlot(EquipmentSlot.HEAD).isEmpty()) {
+                mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.CHAINMAIL_HELMET));
+            }
+            if (mob.getItemBySlot(EquipmentSlot.CHEST).isEmpty()) {
+                mob.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.CHAINMAIL_CHESTPLATE));
+            }
         }
+    }
+
+    /**
+     * Equips and tags a Siege Engineer zombie (za_engineer) for temporary bridge/pillar building.
+     */
+    public static void applyEngineerLoadout(Zombie zombie) {
+        if (zombie == null) {
+            return;
+        }
+        zombie.addTag("za_horde_mob");
+        zombie.addTag(ENGINEER_TAG);
+        zombie.addTag(LABELED_MOB_TAG);
+        zombie.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_PICKAXE));
+        zombie.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.COARSE_DIRT));
+        zombie.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.CHAINMAIL_HELMET));
+        zombie.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.CHAINMAIL_CHESTPLATE));
+        applySpecialMobIndicator(zombie);
     }
 
     public static boolean isTaczTurretEntityTypeId(String namespace, String path) {
@@ -1078,5 +1166,374 @@ public final class HordeSpecialUnitHelper {
             }
         }
         return redirected;
+    }
+
+    /**
+     * Pure coordinate selector returning the index of the closest enabled turret within [minRange, maxRange], or -1.
+     */
+    public static int selectThrowerTurretIndex(
+            double jx,
+            double jy,
+            double jz,
+            double[] tx,
+            double[] ty,
+            double[] tz,
+            boolean[] aliveAndEnabled,
+            double minRange,
+            double maxRange
+    ) {
+        if (tx == null || ty == null || tz == null || aliveAndEnabled == null || maxRange <= 0.0D) {
+            return -1;
+        }
+        int n = Math.min(Math.min(tx.length, ty.length), Math.min(tz.length, aliveAndEnabled.length));
+        double minSq = Math.max(0.0D, minRange) * Math.max(0.0D, minRange);
+        double maxSq = maxRange * maxRange;
+        int bestIdx = -1;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int i = 0; i < n; i++) {
+            if (!aliveAndEnabled[i]) {
+                continue;
+            }
+            double dx = tx[i] - jx;
+            double dy = ty[i] - jy;
+            double dz = tz[i] - jz;
+            double dSq = dx * dx + dy * dy + dz * dz;
+            if (dSq >= minSq && dSq <= maxSq && dSq < bestDistSq) {
+                bestDistSq = dSq;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+
+    /**
+     * Pure coordinate selector returning the index of the closest eligible player within [minRange, maxRange]
+     * (or elevated >= 1.5 blocks above the Juggernaut within maxRange), or -1.
+     */
+    public static int selectThrowerPlayerIndex(
+            double jx,
+            double jy,
+            double jz,
+            double[] px,
+            double[] py,
+            double[] pz,
+            boolean[] eligible,
+            double minRange,
+            double maxRange
+    ) {
+        if (px == null || py == null || pz == null || eligible == null || maxRange <= 0.0D) {
+            return -1;
+        }
+        int n = Math.min(Math.min(px.length, py.length), Math.min(pz.length, eligible.length));
+        double minSq = Math.max(0.0D, minRange) * Math.max(0.0D, minRange);
+        double maxSq = maxRange * maxRange;
+        int bestIdx = -1;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int i = 0; i < n; i++) {
+            if (!eligible[i]) {
+                continue;
+            }
+            double dx = px[i] - jx;
+            double dy = py[i] - jy;
+            double dz = pz[i] - jz;
+            double dSq = dx * dx + dy * dy + dz * dz;
+            boolean elevated = py[i] >= jy + 1.5D;
+            if ((dSq >= minSq || elevated) && dSq <= maxSq && dSq < bestDistSq) {
+                bestDistSq = dSq;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+
+    /**
+     * Selects a throw target for a Juggernaut within [minRange, maxRange]:
+     * strictly prioritizes enabled TACZ turrets ahead of players.
+     */
+    public static LivingEntity selectThrowerTarget(
+            Mob juggernaut,
+            List<? extends Mob> turrets,
+            List<? extends LivingEntity> players,
+            double minRange,
+            double maxRange
+    ) {
+        if (juggernaut == null || maxRange <= 0.0D) {
+            return null;
+        }
+        double minSq = Math.max(0.0D, minRange) * Math.max(0.0D, minRange);
+        double maxSq = maxRange * maxRange;
+
+        Mob bestTurret = null;
+        double bestTurretDistSq = Double.MAX_VALUE;
+        if (turrets != null) {
+            for (Mob turret : turrets) {
+                if (turret == null || !turret.isAlive() || turret.isRemoved() || !isTurretEnabled(turret)) {
+                    continue;
+                }
+                double dSq = juggernaut.distanceToSqr(turret);
+                if (dSq >= minSq && dSq <= maxSq && dSq < bestTurretDistSq) {
+                    bestTurretDistSq = dSq;
+                    bestTurret = turret;
+                }
+            }
+        }
+        if (bestTurret != null) {
+            return bestTurret;
+        }
+
+        LivingEntity bestPlayer = null;
+        double bestPlayerDistSq = Double.MAX_VALUE;
+        if (players != null) {
+            for (LivingEntity player : players) {
+                if (player == null || !player.isAlive() || player.isRemoved()) {
+                    continue;
+                }
+                if (player instanceof ServerPlayer sp && !ChunkHeatManager.isEligibleHordeTargetPlayer(sp)) {
+                    continue;
+                }
+                double dSq = juggernaut.distanceToSqr(player);
+                boolean elevated = player.getY() >= juggernaut.getY() + 1.5D;
+                if ((dSq >= minSq || elevated) && dSq <= maxSq && dSq < bestPlayerDistSq) {
+                    bestPlayerDistSq = dSq;
+                    bestPlayer = player;
+                }
+            }
+        }
+        return bestPlayer;
+    }
+
+    /**
+     * Computes an arcing ballistic launch vector from {@code from} to {@code to} under Minecraft gravity.
+     */
+    public static Vec3 computeBallisticThrowVelocity(Vec3 from, Vec3 to) {
+        if (from == null || to == null) {
+            return new Vec3(0.0D, 0.5D, 0.0D);
+        }
+        double dx = to.x - from.x;
+        double dy = to.y - from.y;
+        double dz = to.z - from.z;
+        double horiz = Math.hypot(dx, dz);
+        double flightTicks = Math.max(16.0D, Math.min(36.0D, horiz * 1.15D));
+        double vx = (dx / flightTicks) * 1.12D;
+        double vz = (dz / flightTicks) * 1.12D;
+        double vy = (dy / flightTicks) + (0.5D * 0.08D * flightTicks) + 0.15D;
+        vy = Math.max(0.42D, Math.min(1.35D, vy));
+        return new Vec3(vx, vy, vz);
+    }
+
+    /**
+     * Returns true if a plain horde zombie can be converted into a [CRAWLER] projectile by a Juggernaut.
+     */
+    public static boolean canBeConvertedToThrowAmmo(Collection<String> tags) {
+        if (tags == null || !tags.contains("za_horde_mob")) {
+            return false;
+        }
+        return !tags.contains(TANKER_TAG)
+                && !tags.contains(KNIGHT_TAG)
+                && !tags.contains(KNIGHT_MOUNT_TAG)
+                && !tags.contains(JUGGERNAUT_TAG)
+                && !tags.contains(ENGINEER_TAG)
+                && !tags.contains(BLOODMOON_WARDEN_TAG)
+                && !tags.contains(THROWN_PROJECTILE_TAG)
+                && !tags.contains(SAPPER_FUSE_TAG);
+    }
+
+    /**
+     * Converts a plain horde zombie into a fast [CRAWLER] unit with Speed II and 0.75x scale.
+     */
+    public static void convertHordeZombieToCrawler(Zombie zombie) {
+        if (zombie == null || !zombie.isAlive()) {
+            return;
+        }
+        zombie.addTag("za_horde_mob");
+        zombie.addTag(CRAWLER_TAG);
+        zombie.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+        applySpecialMobIndicator(zombie);
+    }
+
+    /**
+     * Advances a thrown Sapper's 50-tick landing fuse by 1 tick.
+     *
+     * @return true when the fuse hits 0 and the Sapper should detonate.
+     */
+    public static boolean stepThrownSapperFuse(ThrownSapperFuseState state, boolean landedNow) {
+        if (state == null) {
+            return false;
+        }
+        if (!state.landed) {
+            state.airborneTicks++;
+            if (landedNow || state.airborneTicks >= 80) {
+                state.landed = true;
+            } else {
+                return false;
+            }
+        }
+        state.remainingFuseTicks--;
+        return state.remainingFuseTicks <= 0;
+    }
+
+    /**
+     * Every 200 ticks (10s) per alive Juggernaut, grabs a nearby [CRAWLER], [SAPPER], or plain horde zombie
+     * within 5 blocks and hurls it along a ballistic arc toward the highest-priority turret or player target.
+     */
+    public static boolean tickJuggernautThrower(
+            ServerLevel level,
+            Zombie juggernaut,
+            List<? extends Mob> turrets,
+            long currentTick
+    ) {
+        if (level == null || juggernaut == null || !juggernaut.isAlive() || juggernaut.isRemoved()) {
+            return false;
+        }
+        if (Math.floorMod(currentTick + juggernaut.getId(), 20L) != 0L) {
+            return false;
+        }
+        int interval = ZAConfigZDay.juggernautThrowIntervalTicks > 0
+                ? ZAConfigZDay.juggernautThrowIntervalTicks
+                : DEFAULT_JUGGERNAUT_THROW_INTERVAL_TICKS;
+        long lastThrow = JUGGERNAUT_LAST_THROW_TICK.getOrDefault(juggernaut.getUUID(), -999999L);
+        if ((currentTick - lastThrow) < interval) {
+            return false;
+        }
+
+        double minRange = ZAConfigZDay.juggernautThrowMinRange >= 0.0D
+                ? ZAConfigZDay.juggernautThrowMinRange
+                : DEFAULT_JUGGERNAUT_THROW_MIN_RANGE;
+        double maxRange = ZAConfigZDay.juggernautThrowMaxRange > minRange
+                ? ZAConfigZDay.juggernautThrowMaxRange
+                : DEFAULT_JUGGERNAUT_THROW_MAX_RANGE;
+
+        LivingEntity target = selectThrowerTarget(juggernaut, turrets, level.players(), minRange, maxRange);
+        if (target == null) {
+            return false;
+        }
+
+        double grabRadiusSq = JUGGERNAUT_AMMO_GRAB_RADIUS * JUGGERNAUT_AMMO_GRAB_RADIUS;
+        List<Zombie> candidates = level.getEntitiesOfClass(
+                Zombie.class,
+                juggernaut.getBoundingBox().inflate(JUGGERNAUT_AMMO_GRAB_RADIUS),
+                z -> z != null && z != juggernaut && z.isAlive() && !z.isRemoved()
+                        && !z.isPassenger()
+                        && juggernaut.distanceToSqr(z) <= grabRadiusSq
+        );
+        if (candidates.isEmpty()) {
+            return false;
+        }
+
+        Zombie specialAmmo = null;
+        double specialDistSq = Double.MAX_VALUE;
+        Zombie plainAmmo = null;
+        double plainDistSq = Double.MAX_VALUE;
+
+        for (Zombie cand : candidates) {
+            Collection<String> tags = cand.entityTags();
+            if (tags.contains(THROWN_PROJECTILE_TAG) || tags.contains(SAPPER_FUSE_TAG)) {
+                continue;
+            }
+            double dSq = juggernaut.distanceToSqr(cand);
+            if (tags.contains(CRAWLER_TAG) || tags.contains(SAPPER_TAG)) {
+                if (dSq < specialDistSq) {
+                    specialDistSq = dSq;
+                    specialAmmo = cand;
+                }
+            } else if (canBeConvertedToThrowAmmo(tags) && dSq < plainDistSq) {
+                plainDistSq = dSq;
+                plainAmmo = cand;
+            }
+        }
+
+        Zombie ammo = specialAmmo != null ? specialAmmo : plainAmmo;
+        if (ammo == null) {
+            return false;
+        }
+        if (specialAmmo == null) {
+            convertHordeZombieToCrawler(ammo);
+        }
+
+        JUGGERNAUT_LAST_THROW_TICK.put(juggernaut.getUUID(), currentTick);
+        ammo.setPos(juggernaut.getX(), juggernaut.getY() + 1.2D, juggernaut.getZ());
+        Vec3 velocity = computeBallisticThrowVelocity(
+                ammo.position(),
+                target.position().add(0.0D, target.getBbHeight() * 0.5D, 0.0D)
+        );
+        ammo.setDeltaMovement(velocity);
+        ammo.needsSync = true;
+        ammo.removeTag(THROWN_LANDED_TAG);
+        ammo.addTag(THROWN_PROJECTILE_TAG);
+        ammo.setTarget(target);
+
+        if (ammo.entityTags().contains(SAPPER_TAG)) {
+            int fuseTicks = ZAConfigZDay.thrownSapperFuseTicks > 0
+                    ? ZAConfigZDay.thrownSapperFuseTicks
+                    : DEFAULT_THROWN_SAPPER_FUSE_TICKS;
+            ammo.addTag(SAPPER_FUSE_TAG);
+            ARMED_THROWN_SAPPERS.put(ammo.getUUID(), new ThrownSapperFuseState(fuseTicks));
+        }
+
+        try {
+            juggernaut.swing(InteractionHand.MAIN_HAND, SwingAnimation.DEFAULT);
+            level.playSound(null, juggernaut.getX(), juggernaut.getY(), juggernaut.getZ(),
+                    SoundEvents.IRON_GOLEM_ATTACK, SoundSource.HOSTILE, 1.6F, 0.85F);
+            level.playSound(null, juggernaut.getX(), juggernaut.getY(), juggernaut.getZ(),
+                    SoundEvents.WITHER_SHOOT, SoundSource.HOSTILE, 0.8F, 1.2F);
+        } catch (Throwable ignored) {
+        }
+        return true;
+    }
+
+    /**
+     * Ticks armed thrown TNT Sappers, emitting smoke/hiss particles on landing and detonating after 50 ticks.
+     */
+    public static int tickThrownSappers(ServerLevel level, List<? extends Mob> sappers) {
+        if (level == null || sappers == null || sappers.isEmpty()) {
+            return 0;
+        }
+        int detonated = 0;
+        for (Mob sapper : sappers) {
+            if (sapper == null || !sapper.isAlive() || sapper.isRemoved()) {
+                continue;
+            }
+            int defaultFuse = ZAConfigZDay.thrownSapperFuseTicks > 0
+                    ? ZAConfigZDay.thrownSapperFuseTicks
+                    : DEFAULT_THROWN_SAPPER_FUSE_TICKS;
+            ThrownSapperFuseState state = ARMED_THROWN_SAPPERS.computeIfAbsent(
+                    sapper.getUUID(),
+                    id -> new ThrownSapperFuseState(defaultFuse)
+            );
+            boolean wasLanded = state.landed;
+            boolean landedNow = sapper.onGround() || sapper.entityTags().contains(THROWN_LANDED_TAG);
+            boolean shouldExplode = stepThrownSapperFuse(state, landedNow);
+
+            if (!wasLanded && state.landed) {
+                try {
+                    level.playSound(null, sapper.getX(), sapper.getY(), sapper.getZ(),
+                            SoundEvents.TNT_PRIMED, SoundSource.HOSTILE, 1.5F, 1.0F);
+                } catch (Throwable ignored) {
+                }
+            }
+            if (shouldExplode) {
+                ARMED_THROWN_SAPPERS.remove(sapper.getUUID());
+                try {
+                    double ex = sapper.getX();
+                    double ey = sapper.getY() + 0.5D;
+                    double ez = sapper.getZ();
+                    sapper.discard();
+                    level.explode(sapper, ex, ey, ez, 2.8F, Level.ExplosionInteraction.TNT);
+                    detonated++;
+                } catch (Throwable ignored) {
+                }
+            } else if (state.landed && (state.remainingFuseTicks % 4 == 0)) {
+                try {
+                    level.sendParticles(ParticleTypes.SMOKE, sapper.getX(), sapper.getY() + 1.0D, sapper.getZ(),
+                            2, 0.15D, 0.2D, 0.15D, 0.02D);
+                    if (state.remainingFuseTicks % 16 == 0) {
+                        level.playSound(null, sapper.getX(), sapper.getY(), sapper.getZ(),
+                                SoundEvents.TNT_PRIMED, SoundSource.HOSTILE, 1.2F, 1.15F);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return detonated;
     }
 }

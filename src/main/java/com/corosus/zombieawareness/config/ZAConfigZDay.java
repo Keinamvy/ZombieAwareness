@@ -8,31 +8,31 @@ import java.io.File;
 public class ZAConfigZDay implements IConfigCategory {
 
     @ConfigComment("World day when Stage 2 (Acoustic Discipline & TaCZ Heat) unlocks")
-    public static int dayStage2TaCZ = 4;
+    public static int dayStage2TaCZ = 21;
 
     @ConfigComment("World day when Stage 3 (Blackout Stalkers light hunting) unlocks")
-    public static int dayStage3Blackout = 6;
+    public static int dayStage3Blackout = 41;
 
     @ConfigComment("World day when Stage 4 (Bloodmoon periodic siege) unlocks")
-    public static int dayStage4Bloodmoon = 8;
+    public static int dayStage4Bloodmoon = 49;
 
     @ConfigComment("World day when Stage 5 (Pickaxe Breachers) unlocks")
-    public static int dayStage5Breachers = 11;
+    public static int dayStage5Breachers = 57;
 
     @ConfigComment("World day when Stage 6 (Web-trappers & bloodlust sprinters) unlocks")
-    public static int dayStage6WebsAndSprinters = 14;
+    public static int dayStage6WebsAndSprinters = 65;
 
     @ConfigComment("World day when Stage 7 (Screamer scouts & swarm overrun) unlocks")
-    public static int dayStage7Screamers = 18;
+    public static int dayStage7Screamers = 73;
 
     @ConfigComment("World day when Stage 8 (Combat Engineers bridge & pillar) unlocks")
-    public static int dayStage8Engineers = 22;
+    public static int dayStage8Engineers = 82;
 
     @ConfigComment("World day when Stage 9 (Armored Juggernauts & Crawlers) unlocks")
-    public static int dayStage9Juggernauts = 26;
+    public static int dayStage9Juggernauts = 91;
 
     @ConfigComment("World day when Stage 10 (Demolition Sappers & Total Collapse) unlocks")
-    public static int dayStage10Collapse = 30;
+    public static int dayStage10Collapse = 100;
 
     @ConfigComment("Frequency in days between Bloodmoons after Stage 4 is reached")
     public static int bloodmoonFrequencyDays = 6;
@@ -78,6 +78,21 @@ public class ZAConfigZDay implements IConfigCategory {
 
     @ConfigComment("Maximum nearby hostile mobs within 24 blocks before damage-clone spawning pauses")
     public static int mobDamageCloneMaxNearby = 48;
+
+    @ConfigComment("Cooldown in ticks between Juggernaut zombie-throwing attacks (200 ticks = 10 seconds)")
+    public static int juggernautThrowIntervalTicks = 200;
+
+    @ConfigComment("Minimum distance in blocks to a turret or player before a Juggernaut throws a Crawler or Sapper")
+    public static double juggernautThrowMinRange = 8.0;
+
+    @ConfigComment("Maximum distance in blocks a Juggernaut can throw a Crawler or Sapper toward a turret or player")
+    public static double juggernautThrowMaxRange = 28.0;
+
+    @ConfigComment("Landing fuse duration in ticks for TNT Sappers thrown by a Juggernaut (50 ticks = 2.5 seconds)")
+    public static int thrownSapperFuseTicks = 50;
+
+    @ConfigComment("Maximum bonus diamonds dropped by non-Warden elite horde mobs per 5-minute (6000-tick) rolling window across all hordes")
+    public static int maxBonusDiamondsPerHordeWindow = 32;
 
     @Override
     public String getName() {
