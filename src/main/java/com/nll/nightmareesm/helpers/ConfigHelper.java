@@ -64,15 +64,25 @@ public class ConfigHelper {
 
    public static EntityType<?> GetRandomEntityTypeFromConfig(ConfigValue<List<? extends String>> Config) {
       String EntityTypeName = GetRandomValueFromConfig(Config);
-      return GetEntityTypeFromName(EntityTypeName);
+      return EntityTypeName != null ? GetEntityTypeFromName(EntityTypeName) : null;
    }
 
    public static String GetRandomValueFromConfig(ConfigValue<List<? extends String>> Config) {
-      int MobNum = Clocker.GetIndexFromTime(Config.get().size());
-      return Config.get().get(MobNum);
+      if (Config == null) {
+         return null;
+      }
+      List<? extends String> values = Config.get();
+      if (values == null || values.isEmpty()) {
+         return null;
+      }
+      int MobNum = Clocker.GetIndexFromTime(values.size());
+      return values.get(MobNum);
    }
 
    public static EntityType<?> GetEntityTypeFromName(String EntityName) {
+      if (EntityName == null || EntityName.isBlank()) {
+         return null;
+      }
       Identifier Monster_Identifier = Identifier.parse(EntityName);
       Optional<Reference<EntityType<?>>> Ent_Type = BuiltInRegistries.ENTITY_TYPE.get(Monster_Identifier);
       return Ent_Type.map(Reference::value).orElse(null);

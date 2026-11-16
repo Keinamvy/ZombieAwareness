@@ -18,9 +18,9 @@ public class ZDayPlayerLedger {
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    public long activePlayTicks = 0L;
-    public int forcedWorldDay = -1;
-    public int lastBroadcastedStage = 1;
+    public volatile long activePlayTicks = 0L;
+    public volatile int forcedWorldDay = -1;
+    public volatile int lastBroadcastedStage = 1;
     public Map<String, Integer> playerLastSeenStage = new HashMap<>();
     public Map<String, Integer> playerLastSeenDay = new HashMap<>();
 

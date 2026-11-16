@@ -53,11 +53,19 @@ public final class nightmareesm implements ModInitializer {
 
    @Override
    public void onInitialize() {
-      ServerLifecycleEvents.SERVER_STARTING.register(server -> currentServer = server);
+      ServerLifecycleEvents.SERVER_STARTING.register(server -> {
+         currentServer = server;
+         MobScreamerAlert.resetLastGlobalScreamTick();
+         MobPlaceTNT.clearCooldowns();
+         CreeperBreachWalls.clearTickMap();
+      });
       ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
          if (currentServer == server) {
             currentServer = null;
          }
+         MobScreamerAlert.resetLastGlobalScreamTick();
+         MobPlaceTNT.clearCooldowns();
+         CreeperBreachWalls.clearTickMap();
       });
       init();
       LOGGER.info("Epic Siege Mod - Arming (Fabric 26.3)!");
@@ -204,74 +212,102 @@ public final class nightmareesm implements ModInitializer {
    }
 
    public static void onFinalizeSpawn(Mob M, EntitySpawnReason Spawn_Reason) {
-      onFinalizeSpawn(M, Spawn_Reason, 1, false);
+      onFinalizeSpawn(M, Spawn_Reason, 1, false, false);
    }
 
    public static void onFinalizeSpawn(Mob M, EntitySpawnReason Spawn_Reason, int currentStage, boolean isBloodmoon) {
-      if ((Boolean)ESMConfig.isSiegeModeEnabled.get()) {
-         Entity Entity_Class = M;
-         if (M != null) {
-            Level Lvl = MobInfo.GetMobLevel(M);
-            if (Lvl != null && !Lvl.isClientSide()) {
-               EntityType<?> resolvedType = Entity_Class.getType();
-               if (resolvedType != null && Entity_Class instanceof Zombie z) {
-                  boolean allowPickaxe = canUseBehaviorForStage("PICKAXE_DIG", currentStage);
-                  new NightmareZombie(z, allowPickaxe);
+      onFinalizeSpawn(M, Spawn_Reason, currentStage, isBloodmoon, false);
+   }
 
-                  if (canRollAsScreamer(Spawn_Reason, currentStage)) {
-                     if (new RNG().GetInt(0, 100) < 8) {
-                        makeScreamer(z);
-                     }
-                  }
+   /**
+    * Returns true when immediate synchronous duplication during finalizeSpawn is safe.
+    * Blocks worldgen regions (non-ServerLevel), off-thread workers (e.g. C2ME), and
+    * structure/chunk-generation/summoned spawns to prevent ServerChunkCache.getChunkOffThread deadlocks.
+    */
+   public static boolean canDuplicateOnFinalizeSpawn(EntitySpawnReason spawnReason, boolean isLiveServerLevel, boolean isServerThread) {
+      if (!isLiveServerLevel || !isServerThread) {
+         return false;
+      }
+      return spawnReason != EntitySpawnReason.MOB_SUMMONED
+         && spawnReason != EntitySpawnReason.CHUNK_GENERATION
+         && spawnReason != EntitySpawnReason.STRUCTURE;
+   }
 
-                  if (canUseBehaviorForStage("JUGGERNAUT_CRAWLER", currentStage)) {
-                     if (new RNG().GetInt(0, 100) < 12) {
-                        applyJuggernautLoadout(z);
-                     }
+   public static boolean isSafeLiveServerFinalizeSpawn(Level lvl, boolean isLiveServerLevel) {
+      if (!isLiveServerLevel || !(lvl instanceof net.minecraft.server.level.ServerLevel serverLvl)) {
+         return false;
+      }
+      MinecraftServer server = serverLvl.getServer();
+      return server != null && server.isSameThread();
+   }
+
+   public static void onFinalizeSpawn(Mob M, EntitySpawnReason Spawn_Reason, int currentStage, boolean isBloodmoon, boolean isLiveServerLevel) {
+      if ((Boolean)ESMConfig.isSiegeModeEnabled.get() && M != null) {
+         Level Lvl = MobInfo.GetMobLevel(M);
+         if (Lvl != null && !Lvl.isClientSide() && isSafeLiveServerFinalizeSpawn(Lvl, isLiveServerLevel)) {
+            Entity Entity_Class = M;
+            EntityType<?> resolvedType = Entity_Class.getType();
+            if (resolvedType != null && Entity_Class instanceof Zombie z) {
+               boolean allowPickaxe = canUseBehaviorForStage("PICKAXE_DIG", currentStage);
+               new NightmareZombie(z, allowPickaxe);
+
+               if (canRollAsScreamer(Spawn_Reason, currentStage)) {
+                  if (new RNG().GetInt(0, 100) < 8) {
+                     makeScreamer(z);
                   }
                }
 
-               if (Entity_Class instanceof Creeper && (Boolean)ESMConfig.isChargedCreeperAllowed.get()) {
-                  new NightmareCreeper(Entity_Class, (Double)ESMConfig.ChargedCreeperChance.get());
+               if (canUseBehaviorForStage("JUGGERNAUT_CRAWLER", currentStage)) {
+                  if (new RNG().GetInt(0, 100) < 12) {
+                     applyJuggernautLoadout(z);
+                  }
+               }
+            }
+
+            if (Entity_Class instanceof Creeper && (Boolean)ESMConfig.isChargedCreeperAllowed.get()) {
+               new NightmareCreeper(Entity_Class, (Double)ESMConfig.ChargedCreeperChance.get());
+            }
+
+            if (Entity_Class instanceof Skeleton) {
+               new NightmareSkeleton(M);
+            } else if (Entity_Class instanceof Spider) {
+               new NightmareSpider(Entity_Class);
+            }
+
+            if ((Boolean)ESMConfig.Entity_Duplication.get()) {
+               int MaxDupes = (Integer)ESMConfig.MaxDuplicationClones.get();
+               int MinDupes = (Integer)ESMConfig.MinDuplicationClones.get();
+               if (MinDupes > MaxDupes) {
+                  MinDupes = MaxDupes;
                }
 
-               if (Entity_Class instanceof Skeleton) {
-                  new NightmareSkeleton(M);
-               } else if (Entity_Class instanceof Spider) {
-                  new NightmareSpider(Entity_Class);
-               }
+               boolean isServerThread = Lvl instanceof net.minecraft.server.level.ServerLevel serverLvl
+                  && serverLvl.getServer() != null
+                  && serverLvl.getServer().isSameThread();
 
-               if ((Boolean)ESMConfig.Entity_Duplication.get()) {
-                  int MaxDupes = (Integer)ESMConfig.MaxDuplicationClones.get();
-                  int MinDupes = (Integer)ESMConfig.MinDuplicationClones.get();
-                  if (MinDupes > MaxDupes) {
-                     MinDupes = MaxDupes;
-                  }
-
-                  if (Spawn_Reason != EntitySpawnReason.MOB_SUMMONED && Spawn_Reason != EntitySpawnReason.CHUNK_GENERATION) {
-                     int TotalDupes = new RNG().GetInt(MinDupes, MaxDupes + 1);
-                     if (nightmareesm.ShouldDuplicate()) {
-                        new DuplicateMob(M, TotalDupes);
-                     }
-                  }
-
-                  if (Spawn_Reason == EntitySpawnReason.SPAWNER) {
-                     int MaxDungeonDupes = (Integer)ESMConfig.MaxDungeonDuplicationClones.get();
-                     int MinDungeonDupes = (Integer)ESMConfig.MinDungeonDuplicationClones.get();
-                     if (MinDungeonDupes > MaxDungeonDupes) {
-                        MinDungeonDupes = MaxDungeonDupes;
-                     }
-
-                     int TotalDupes = new RNG().GetInt(MinDungeonDupes, MaxDungeonDupes + 1);
+               if (canDuplicateOnFinalizeSpawn(Spawn_Reason, isLiveServerLevel, isServerThread)) {
+                  int TotalDupes = new RNG().GetInt(MinDupes, MaxDupes + 1);
+                  if (nightmareesm.ShouldDuplicate()) {
                      new DuplicateMob(M, TotalDupes);
                   }
                }
 
-               if ((Boolean)ESMConfig.AngryEntities.get() && canUseBehaviorForStage("BLOODLUST", currentStage)) {
-                  float Bloodlust_RNG = new RNG().GetInt(0, 100);
-                  if (Bloodlust_RNG < ((Integer)ESMConfig.AngryEntityChance.get()).intValue()) {
-                     new MobBloodlust(Entity_Class);
+               if (Spawn_Reason == EntitySpawnReason.SPAWNER && isLiveServerLevel && isServerThread) {
+                  int MaxDungeonDupes = (Integer)ESMConfig.MaxDungeonDuplicationClones.get();
+                  int MinDungeonDupes = (Integer)ESMConfig.MinDungeonDuplicationClones.get();
+                  if (MinDungeonDupes > MaxDungeonDupes) {
+                     MinDungeonDupes = MaxDungeonDupes;
                   }
+
+                  int TotalDupes = new RNG().GetInt(MinDungeonDupes, MaxDungeonDupes + 1);
+                  new DuplicateMob(M, TotalDupes);
+               }
+            }
+
+            if ((Boolean)ESMConfig.AngryEntities.get() && canUseBehaviorForStage("BLOODLUST", currentStage)) {
+               float Bloodlust_RNG = new RNG().GetInt(0, 100);
+               if (Bloodlust_RNG < ((Integer)ESMConfig.AngryEntityChance.get()).intValue()) {
+                  new MobBloodlust(Entity_Class);
                }
             }
          }
@@ -279,14 +315,18 @@ public final class nightmareesm implements ModInitializer {
    }
 
    public static boolean canRollAsScreamer(EntitySpawnReason reason, int currentStage) {
-      return reason != EntitySpawnReason.MOB_SUMMONED
+      return reason != null
+         && reason != EntitySpawnReason.MOB_SUMMONED
          && reason != EntitySpawnReason.REINFORCEMENT
+         && reason != EntitySpawnReason.STRUCTURE
+         && reason != EntitySpawnReason.CHUNK_GENERATION
          && canUseBehaviorForStage("SCREAMER_SCOUT", currentStage);
    }
 
    public static void makeScreamer(Zombie z) {
       if (z != null) {
          z.addTag("za_screamer");
+         com.corosus.zombieawareness.heat.HordeSpecialUnitHelper.applySpecialMobIndicator(z);
       }
    }
 
@@ -298,6 +338,7 @@ public final class nightmareesm implements ModInitializer {
          if (attr != null) {
             attr.setBaseValue(0.85D);
          }
+         com.corosus.zombieawareness.heat.HordeSpecialUnitHelper.applySpecialMobIndicator(z);
       }
    }
 
@@ -316,6 +357,7 @@ public final class nightmareesm implements ModInitializer {
             if (z.getHealth() > 0 && (z.getHealth() - amount) <= z.getMaxHealth() * 0.30f) {
                z.addTag("za_crawler");
                z.addEffect(new MobEffectInstance(MobEffects.SPEED, 600, 1));
+               com.corosus.zombieawareness.heat.HordeSpecialUnitHelper.applySpecialMobIndicator(z);
             }
          }
       }

@@ -9,6 +9,7 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
@@ -17,28 +18,32 @@ import org.slf4j.LoggerFactory;
 public class ESMConfig {
    private static final Logger LOGGER = LoggerFactory.getLogger("nightmareesm-config");
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-   private static final List<ConfigValue<?>> ALL_CONFIGS = new ArrayList<>();
+   private static final List<ConfigValue<?>> ALL_CONFIGS = Collections.synchronizedList(new ArrayList<>());
 
    public static class ConfigValue<T> {
       protected final String key;
       protected final String comment;
       protected final T defaultValue;
-      protected T value;
+      protected volatile T value;
 
       public ConfigValue(String key, String comment, T defaultValue) {
          this.key = key;
          this.comment = comment;
-         this.defaultValue = defaultValue;
-         this.value = defaultValue;
+         @SuppressWarnings("unchecked")
+         T normalizedDefault = defaultValue instanceof List<?> list ? (T) List.copyOf(list) : defaultValue;
+         this.defaultValue = normalizedDefault;
+         this.value = normalizedDefault;
          ALL_CONFIGS.add(this);
       }
 
       public T get() {
-         return this.value != null ? this.value : this.defaultValue;
+         T v = this.value;
+         return v != null ? v : this.defaultValue;
       }
 
+      @SuppressWarnings("unchecked")
       public void set(T val) {
-         this.value = val;
+         this.value = val instanceof List<?> list ? (T) List.copyOf(list) : val;
       }
 
       public String getKey() {
@@ -152,7 +157,7 @@ public class ESMConfig {
       List.of("plank", "stair", "fence", "door", "stripped")
    );
 
-   public static void loadConfig() {
+   public static synchronized void loadConfig() {
       try {
          Path configDir = FabricLoader.getInstance().getConfigDir();
          Path configFile = configDir.resolve("nightmareesm.json");
@@ -170,7 +175,7 @@ public class ESMConfig {
                      } else if (cv.getDefaultValue() instanceof List) {
                         List<String> list = new ArrayList<>();
                         json.get(cv.getKey()).getAsJsonArray().forEach(el -> list.add(el.getAsString()));
-                        ((ConfigValue<List<String>>) cv).set(list);
+                        ((ConfigValue<List<String>>) cv).set(List.copyOf(list));
                      }
                   }
                }
@@ -185,7 +190,7 @@ public class ESMConfig {
       }
    }
 
-   public static void saveConfig(Path configFile) {
+   public static synchronized void saveConfig(Path configFile) {
       try {
          JsonObject json = new JsonObject();
          StringBuilder toml = new StringBuilder("# NightmareESM Configuration\n\n");

@@ -2,6 +2,8 @@ package com.nll.nightmareesm.MobBehavs;
 
 import com.nll.nightmareesm.ESMConfig;
 import com.nll.nightmareesm.GetBlockingBlock;
+import com.nll.nightmareesm.MobInfo;
+import java.util.Collections;
 import java.util.Map;
 import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
@@ -13,17 +15,20 @@ import org.slf4j.LoggerFactory;
 
 public class CreeperBreachWalls {
    private static final Logger LOGGER = LoggerFactory.getLogger("CreeperBreachWalls");
-   private static final Map<Creeper, Integer> TICK_MAP = new WeakHashMap<>();
+   private static final Map<Creeper, Integer> TICK_MAP = Collections.synchronizedMap(new WeakHashMap<>());
    public boolean Debug_ExplodeImmediately = false;
 
    public CreeperBreachWalls(Creeper C) {
+      if (C == null) {
+         return;
+      }
       if (this.Debug_ExplodeImmediately) {
          new CreeperExplode(C);
       } else {
          Entity Creeper_Target = C.getTarget();
          if (Creeper_Target != null) {
             Entity Creeper_Entity = C;
-            if (Creeper_Target instanceof ServerPlayer Plyr) {
+            if (Creeper_Target instanceof ServerPlayer Plyr && MobInfo.isSameDimension(C, Plyr)) {
                if (!Plyr.isCreative() && !Plyr.isSpectator()) {
                   float Dist_To_Tgt = C.distanceTo(Creeper_Target);
                   boolean isCloseEnough = Dist_To_Tgt < ((Integer)ESMConfig.CreeperBreachingDistance.get()).intValue();
@@ -51,9 +56,15 @@ public class CreeperBreachWalls {
       }
    }
 
+   public static void clearTickMap() {
+      TICK_MAP.clear();
+   }
+
    void IncTicks(Creeper C) {
-      int CurrTicks = this.GetTicks(C);
-      this.SetTicks(C, ++CurrTicks);
+      synchronized (TICK_MAP) {
+         int CurrTicks = this.GetTicks(C);
+         this.SetTicks(C, ++CurrTicks);
+      }
    }
 
    void SetTicks(Creeper C, int Amt) {

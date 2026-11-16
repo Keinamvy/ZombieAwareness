@@ -1,6 +1,7 @@
 package com.nll.nightmareesm.MobBehavs;
 
 import com.nll.nightmareesm.ESMConfig;
+import com.nll.nightmareesm.MobInfo;
 import com.nll.nightmareesm.helpers.ConfigHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
@@ -20,7 +21,7 @@ public class MobDamageBlock {
          LOGGER.debug("BLOCK COMPARISON OF {} ::: IS_EXCLUDED = {}", Curr_Block, isExcluded);
          if (!isExcluded) {
             Level Lvl = Entity_Class.level();
-            if (Lvl != null && !Lvl.isClientSide()) {
+            if (MobInfo.isServerPosLoaded(Lvl, Block_Pos)) {
                BlockState state = Lvl.getBlockState(Block_Pos);
                if (state.isAir() || state.getDestroySpeed(Lvl, Block_Pos) < 0 || Lvl.getBlockEntity(Block_Pos) != null) {
                   return;

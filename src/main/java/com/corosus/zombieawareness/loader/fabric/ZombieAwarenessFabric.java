@@ -6,11 +6,13 @@ import com.corosus.zombieawareness.bloodmoon.BloodmoonManager;
 import com.corosus.zombieawareness.compat.TaCZIntegration;
 import com.corosus.zombieawareness.config.MobListsConfig;
 import com.corosus.zombieawareness.heat.ChunkHeatManager;
+import com.corosus.zombieawareness.heat.HordeSpecialUnitHelper;
 import com.corosus.zombieawareness.zday.ZDayCommands;
 import com.corosus.zombieawareness.zday.ZDayProgressionManager;
 import fuzs.forgeconfigapiport.fabric.api.v5.ConfigRegistry;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -76,6 +78,21 @@ public class ZombieAwarenessFabric extends ZombieAwareness implements ModInitial
 		});
 
 		ServerLifecycleEvents.SERVER_STARTING.register(ZDayProgressionManager::initServer);
+
+		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+			if (minecraftServer == server) {
+				minecraftServer = null;
+			}
+			ZombieAwareness.clearEntityData();
+			ChunkHeatManager.clearAllHeat();
+		});
+
+		ServerEntityEvents.ENTITY_UNLOAD.register((entity, level) -> {
+			if (entity != null) {
+				ZombieAwareness.removeEntityData(entity.getUUID());
+				HordeSpecialUnitHelper.removeWardenState(entity.getUUID());
+			}
+		});
 
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			ZDayProgressionManager.tickServer(server);

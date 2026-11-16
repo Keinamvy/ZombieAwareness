@@ -23,18 +23,25 @@ public class MobBuildUp {
    public boolean isDoing;
 
    public MobBuildUp(Mob M) {
+      if (M == null) {
+         return;
+      }
       Entity Tgt = M.getTarget();
-      if (Tgt != null && Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && !Server_Player.isSpectator()
+      if (Tgt instanceof ServerPlayer Server_Player && MobInfo.isSameDimension(M, Server_Player)
+            && !Server_Player.isCreative() && !Server_Player.isSpectator()
             && this.isCloseEnough(M, Tgt) && this.isPlayerHighEnough(M, Tgt)) {
          Entity Entity_Class = M;
          BlockPos M_BlockPos = M.blockPosition();
          BlockPos M_BlockPos_Above = M_BlockPos.above();
-         ServerLevel Server_Level = MobInfo.GetMobServerLevel(Server_Player);
-         if (Server_Level != null) {
+         ServerLevel Server_Level = MobInfo.GetMobServerLevel(M);
+         if (MobInfo.isServerPosLoaded(Server_Level, M_BlockPos_Above)) {
             BlockState Block_State = Server_Level.getBlockState(M_BlockPos_Above);
             if (Block_State.isAir() || Block_State.canBeReplaced()) {
                Vec3 Norm_Build_Dir = this.GetBuildDir(M, Tgt);
                BlockPos New_Pos = PositionInfo.OffsetPos(M_BlockPos, Norm_Build_Dir.x, Norm_Build_Dir.y, Norm_Build_Dir.z);
+               if (!MobInfo.isServerPosLoaded(Server_Level, New_Pos)) {
+                  return;
+               }
                BlockState targetState = Server_Level.getBlockState(New_Pos);
                if (targetState.isAir() || targetState.canBeReplaced()) {
                   new MobPlaceBlock(Entity_Class, this.Block_Type, New_Pos);

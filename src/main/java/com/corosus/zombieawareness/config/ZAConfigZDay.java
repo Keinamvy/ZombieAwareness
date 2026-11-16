@@ -41,7 +41,43 @@ public class ZAConfigZDay implements IConfigCategory {
     public static int chunkHeatThreshold = 100;
 
     @ConfigComment("Base number of zombies summoned in a gunfire swarm wave")
-    public static int baseSwarmWaveSize = 28;
+    public static int baseSwarmWaveSize = 48;
+
+    @ConfigComment("Interval in ticks between rapid small-batch horde reinforcement pulses across all phases (15 ticks = 0.75s)")
+    public static int hordeRapidSpawnIntervalTicks = 15;
+
+    @ConfigComment("Base number of horde mobs spawned per rapid reinforcement pulse across all phases (small steady trickles instead of dozen+ bursts)")
+    public static int hordeRapidSpawnBatchSize = 3;
+
+    @ConfigComment("Maximum alive horde mobs allowed near an active horde center per solo player (scales up for squads and doubles during Bloodmoon)")
+    public static int hordeMaxAliveNearPlayer = 180;
+
+    @ConfigComment("Base main horde timer duration in ticks (6000 ticks = 5 minutes) before reinforcements stop and secondary cleanup begins")
+    public static int hordeBaseDurationTicks = 6000;
+
+    @ConfigComment("Secondary Rampage overtime duration in ticks (2400 ticks = 2 minutes) after the main horde timer expires if mobs remain")
+    public static int hordeRampageDurationTicks = 2400;
+
+    @ConfigComment("Arrow velocity multiplier applied to Rampage-phase horde skeletons (1.70 = 70% faster arrows)")
+    public static double hordeRampageArrowSpeedMultiplier = 1.70;
+
+    @ConfigComment("Bow attack interval in ticks for Rampage-phase horde skeletons (lower = faster fire rate)")
+    public static int hordeRampageSkeletonAttackIntervalTicks = 8;
+
+    @ConfigComment("Step-up height in blocks granted to Rampage-phase horde spiders (>= 1.05 enables instant 1-block step-up)")
+    public static double hordeRampageSpiderStepHeight = 1.05;
+
+    @ConfigComment("Chance (0.0 - 1.0) for a damaged hostile mob to spawn 2 clones of itself nearby")
+    public static double mobDamageCloneChance = 0.08;
+
+    @ConfigComment("Number of clones spawned when mobDamageCloneChance triggers")
+    public static int mobDamageCloneCount = 2;
+
+    @ConfigComment("Cooldown in ticks per mob before it can trigger damage-clone spawning again")
+    public static int mobDamageCloneCooldownTicks = 200;
+
+    @ConfigComment("Maximum nearby hostile mobs within 24 blocks before damage-clone spawning pauses")
+    public static int mobDamageCloneMaxNearby = 48;
 
     @Override
     public String getName() {

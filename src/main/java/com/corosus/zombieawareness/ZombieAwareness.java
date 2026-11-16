@@ -14,10 +14,10 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 
 import java.io.File;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -27,9 +27,9 @@ public abstract class ZombieAwareness
     // Define mod id in a common place for everything to reference
     public static final String MODID = "zombieawareness";
 
-    private static ZombieAwareness instance;
+    private static volatile ZombieAwareness instance;
 
-    private HashMap<String, SoundEvent> lookupStringToEvent = new HashMap<>();
+    private final Map<String, SoundEvent> lookupStringToEvent = new ConcurrentHashMap<>();
 
     public static ZombieAwareness instance() {
         return instance;
@@ -39,21 +39,58 @@ public abstract class ZombieAwareness
     public static ResourceKey<EntityType<?>> SENSE_KEY = ResourceKey.create(Registries.ENTITY_TYPE, SENSE_NAME);
     public static EntityType<EntityScent> SENSE;
 
-    public static HashMap<UUID, CompoundTag> entityData = new HashMap<>();
+    public static final Map<UUID, CompoundTag> entityData = new ConcurrentHashMap<>();
 
-    public static HashMap<String, Boolean> unitTest = new HashMap<>();
+    public static final Map<String, Boolean> unitTest = new ConcurrentHashMap<>();
 
     public static void unitTest(String num) {
-        unitTest.put(num, true);
+        if (num != null) {
+            unitTest.put(num, true);
+        }
     }
 
     public CompoundTag getPersistentData(Entity ent) {
-        if (!entityData.containsKey(ent.getUUID())) entityData.put(ent.getUUID(), new CompoundTag());
-        return entityData.get(ent.getUUID());
+        if (ent == null) {
+            return new CompoundTag();
+        }
+        return entityData.computeIfAbsent(ent.getUUID(), k -> new CompoundTag());
     }
 
     public CompoundTag setPersistentData(Entity ent, CompoundTag compoundTag) {
+        if (ent == null || compoundTag == null) {
+            return null;
+        }
         return entityData.put(ent.getUUID(), compoundTag);
+    }
+
+    public static CompoundTag getPersistentDataSafe(Entity ent) {
+        ZombieAwareness inst = instance;
+        if (inst != null) {
+            return inst.getPersistentData(ent);
+        }
+        if (ent == null) {
+            return new CompoundTag();
+        }
+        return entityData.computeIfAbsent(ent.getUUID(), k -> new CompoundTag());
+    }
+
+    public static void setPersistentDataSafe(Entity ent, CompoundTag compoundTag) {
+        ZombieAwareness inst = instance;
+        if (inst != null) {
+            inst.setPersistentData(ent, compoundTag);
+        } else if (ent != null && compoundTag != null) {
+            entityData.put(ent.getUUID(), compoundTag);
+        }
+    }
+
+    public static void removeEntityData(UUID entityUuid) {
+        if (entityUuid != null) {
+            entityData.remove(entityUuid);
+        }
+    }
+
+    public static void clearEntityData() {
+        entityData.clear();
     }
 
     public ZombieAwareness() {

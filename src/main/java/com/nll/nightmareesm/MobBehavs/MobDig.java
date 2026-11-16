@@ -11,15 +11,17 @@ public class MobDig {
    float DigDist = 2.0F;
 
    public MobDig(Entity Entity_Class) {
-      Monster M = (Monster)Entity_Class;
+      if (!(Entity_Class instanceof Monster M)) {
+         return;
+      }
       if (!M.isSwinging()) {
          LivingEntity Tgt = M.getTarget();
-         boolean targetIsPlayer = Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative();
+         boolean targetIsPlayer = Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && !Server_Player.isSpectator();
          boolean navigatingToSense = Tgt == null && M.getNavigation() != null && M.getNavigation().getTargetPos() != null;
          if (targetIsPlayer || navigatingToSense) {
             GetBlockingBlock Blocking_Block = new GetBlockingBlock(Entity_Class);
-            boolean isFaceBlocked = Blocking_Block.Current_Block == null || !Blocking_Block.Current_Block.defaultBlockState().isAir();
-            boolean isFeetBlocked = Blocking_Block.Feet_Block == null || !Blocking_Block.Feet_Block.defaultBlockState().isAir();
+            boolean isFaceBlocked = Blocking_Block.Current_Block != null && !Blocking_Block.Current_Block.defaultBlockState().isAir();
+            boolean isFeetBlocked = Blocking_Block.Feet_Block != null && !Blocking_Block.Feet_Block.defaultBlockState().isAir();
             if (isFaceBlocked) {
                M.swing(M.getUsedItemHand(), SwingAnimation.DEFAULT);
                new MobDamageBlock(Entity_Class, Blocking_Block.Current_Block, Blocking_Block.Current_Position);

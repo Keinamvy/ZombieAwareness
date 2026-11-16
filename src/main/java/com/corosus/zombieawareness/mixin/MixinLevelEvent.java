@@ -17,6 +17,10 @@ public abstract class MixinLevelEvent {
             at = @At(value = "INVOKE", target = "Lnet/minecraft/server/players/PlayerList;broadcast(Lnet/minecraft/world/entity/player/Player;DDDDLnet/minecraft/resources/ResourceKey;Lnet/minecraft/network/protocol/Packet;)V"))
     public void levelEvent(Entity pEntity, int type, BlockPos blockPos, int data, CallbackInfo ci) {
         ZombieAwareness.unitTest("6");
-        ZAUtil.hookPlayEvent(type, ((ServerLevel)(Object)this), blockPos.getX(), blockPos.getY(), blockPos.getZ(), data);
+        ServerLevel self = (ServerLevel)(Object)this;
+        if (blockPos == null || self.getServer() == null || !self.getServer().isSameThread()) {
+            return;
+        }
+        ZAUtil.hookPlayEvent(type, self, blockPos.getX(), blockPos.getY(), blockPos.getZ(), data);
     }
 }

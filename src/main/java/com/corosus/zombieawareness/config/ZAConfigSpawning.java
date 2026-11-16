@@ -8,8 +8,8 @@ import java.io.File;
 
 public class ZAConfigSpawning implements IConfigCategory {
 
-	@ConfigComment("The max count of zombies active in loaded chunks for duplicating zombie at a location, for 1 player, vanilla count is about 25, so this adds 10 extra")
-	public static int maxZombiesNight = 35;
+	@ConfigComment("The max count of zombies active in loaded chunks for duplicating zombie at a location, for 1 player, vanilla count is about 25, so this adds 45 extra")
+	public static int maxZombiesNight = 70;
 	@ConfigComment("Odds to 1 of duplicating extra zombies")
 	public static int maxZombiesNightBaseRarity = 100;
 	@ConfigComment("Delay rate of spawning extra zombies")
@@ -21,7 +21,7 @@ public class ZAConfigSpawning implements IConfigCategory {
 	
 	//surface spawns
 	@ConfigComment("The max count of zombies active in loaded chunks for extra surface spawning")
-	public static int extraSpawningSurfaceMaxCount = 50;
+	public static int extraSpawningSurfaceMaxCount = 100;
 	@ConfigComment("Odds to 1 of spawning extra random zombies")
 	public static int extraSpawningSurfaceRandomPool = 100;
 	@ConfigComment("Min distance required from closest player to spawn extra random position zombie")
@@ -30,11 +30,11 @@ public class ZAConfigSpawning implements IConfigCategory {
 	public static int extraSpawningDistMax = 100;
 	
 	@ConfigComment("Max amount of zombies that can spawn together on surface")
-	public static int extraSpawningSurfaceMaxGroupSize = 3;
+	public static int extraSpawningSurfaceMaxGroupSize = 6;
 	
 	//cave spawns configs
 	@ConfigComment("The max count of zombies active in loaded chunks for extra cave spawning")
-	public static int extraSpawningCavesMaxCount = 50;
+	public static int extraSpawningCavesMaxCount = 100;
 	@ConfigComment("Odds to 1 of spawning extra random zombies")
 	public static int extraSpawningCavesRandomPool = 1;
 	@ConfigComment("Min distance required from closest player to spawn extra random position zombie")

@@ -1,8 +1,10 @@
 package com.corosus.zombieawareness.mixin;
 
+import com.corosus.coroutil.util.CoroUtilBlock;
 import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.ZombieAwareness;
 import com.corosus.zombieawareness.client.SoundProfileEntry;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.entity.player.Player;
@@ -28,11 +30,18 @@ public abstract class MixinExplosion {
             at = @At(value = "HEAD"), cancellable = true)
     public void hook(CallbackInfoReturnable<Integer> cir) {
         ZombieAwareness.unitTest("4");
+        ServerLevel level = level();
+        if (level == null || level.getServer() == null || !level.getServer().isSameThread()) {
+            return;
+        }
+        Vec3 pos = center();
+        BlockPos bp = CoroUtilBlock.blockPos(pos.x, pos.y, pos.z);
+        if (!level.isLoaded(bp)) {
+            return;
+        }
         ZAUtil.initSoundHookDataIfEmpty();
         SoundProfileEntry entry = ZAUtil.getSoundIDEntry(SoundEvents.GENERIC_EXPLODE.value().location().toString());
         if (entry != null) {
-            Vec3 pos = center();
-            ServerLevel level = level();
             Player closestPlayer = ZAUtil.getClosestPlayer(level, pos.x, pos.y, pos.z, 128);
             if (closestPlayer != null) {
                 ZAUtil.handleSoundProfileEvent(level, entry, new Vector3d(pos.x, pos.y, pos.z), closestPlayer);

@@ -7,17 +7,17 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class CoroConfigRegistry {
 
     private static CoroConfigRegistry instance;
 
     private final File baseConfigDir;
-    public final List<IConfigCategory> configs = new ArrayList<>();
+    public final List<IConfigCategory> configs = new CopyOnWriteArrayList<>();
     public final ConcurrentHashMap<String, IConfigCategory> lookupRegistryNameToConfig = new ConcurrentHashMap<>();
     public final ConcurrentHashMap<String, File> lookupRegistryNameToFile = new ConcurrentHashMap<>();
 

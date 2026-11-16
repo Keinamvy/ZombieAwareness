@@ -1,5 +1,6 @@
 package com.nll.nightmareesm.MobBehavs;
 
+import com.nll.nightmareesm.MobInfo;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.sounds.SoundSource;
@@ -12,15 +13,21 @@ import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
 
 public class MobBreakLightSources {
-   private static final Set<Block> LIGHT_BLOCKS = Set.of(
-      Blocks.TORCH,
-      Blocks.WALL_TORCH,
-      Blocks.SOUL_TORCH,
-      Blocks.SOUL_WALL_TORCH,
-      Blocks.LANTERN,
-      Blocks.SOUL_LANTERN,
-      Blocks.GLOWSTONE
-   );
+   private static final class LightBlocksHolder {
+      private static final Set<Block> LIGHT_BLOCKS = Set.of(
+         Blocks.TORCH,
+         Blocks.WALL_TORCH,
+         Blocks.SOUL_TORCH,
+         Blocks.SOUL_WALL_TORCH,
+         Blocks.LANTERN,
+         Blocks.SOUL_LANTERN,
+         Blocks.GLOWSTONE
+      );
+   }
+
+   public static boolean canInspectLightBlock(boolean hasLevel, boolean isClientSide, boolean isLoaded) {
+      return MobInfo.canAccessServerBlock(hasLevel, isClientSide, isLoaded);
+   }
 
    public static boolean tryBreakNearbyLight(Mob mob) {
       if (mob == null) {
@@ -36,8 +43,11 @@ public class MobBreakLightSources {
          for (int y = -1; y <= 2; y++) {
             for (int z = -2; z <= 2; z++) {
                BlockPos targetPos = center.offset(x, y, z);
+               if (!MobInfo.isServerPosLoaded(level, targetPos)) {
+                  continue;
+               }
                BlockState state = level.getBlockState(targetPos);
-               if (LIGHT_BLOCKS.contains(state.getBlock())) {
+               if (LightBlocksHolder.LIGHT_BLOCKS.contains(state.getBlock())) {
                   SoundType soundType = state.getSoundType();
                   level.destroyBlock(targetPos, true, mob);
                   level.playSound(null, targetPos, soundType.getBreakSound(), SoundSource.BLOCKS, 0.8F, 1.0F);

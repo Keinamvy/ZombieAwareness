@@ -14,21 +14,21 @@ import java.lang.reflect.Proxy;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TaCZIntegration {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("ZombieAwareness-TaCZ");
     private static final Map<Integer, Long> lastProcessedTickPerEntity = new ConcurrentHashMap<>();
-    private static boolean registered = false;
+    private static final AtomicBoolean registered = new AtomicBoolean(false);
 
     public static void registerEventsIfLoaded() {
         if (!FabricLoader.getInstance().isModLoaded("tacz")) {
             return;
         }
-        if (registered) {
+        if (!registered.compareAndSet(false, true)) {
             return;
         }
-        registered = true;
 
         try {
             Class<?> eventClass = Class.forName("com.tacz.guns.api.event.common.GunShootEvent");
@@ -104,12 +104,10 @@ public class TaCZIntegration {
             int entityId = shooter.getId();
             long currentTick = serverLevel.getGameTime();
 
-            // Same-tick dedup with SoundManager.sendSoundToNearby
-            Long lastTick = lastProcessedTickPerEntity.get(entityId);
-            if (lastTick != null && lastTick == currentTick) {
+            // Atomic same-tick dedup with SoundManager.sendSoundToNearby
+            if (!tryClaimTick(entityId, currentTick)) {
                 return;
             }
-            recordTickProcessed(entityId, currentTick);
 
             // Determine if suppressed or unsuppressed
             String soundName = "shoot";
@@ -126,7 +124,17 @@ public class TaCZIntegration {
                 }
             } catch (Throwable ignored) {}
 
-            ChunkHeatManager.onTaCZGunSound(serverLevel, shooter.getX(), shooter.getY(), shooter.getZ(), distance, soundName);
+            double sx = shooter.getX();
+            double sy = shooter.getY();
+            double sz = shooter.getZ();
+            String finalSoundName = soundName;
+            int finalDistance = distance;
+            if (serverLevel.getServer() != null && !serverLevel.getServer().isSameThread()) {
+                serverLevel.getServer().execute(() ->
+                        ChunkHeatManager.onTaCZGunSound(serverLevel, sx, sy, sz, finalDistance, finalSoundName));
+            } else {
+                ChunkHeatManager.onTaCZGunSound(serverLevel, sx, sy, sz, finalDistance, finalSoundName);
+            }
         } catch (Throwable t) {
             LOGGER.debug("[ZombieAwareness] Exception handling TaCZ GunShootEvent: " + t.getMessage());
         }
@@ -140,21 +148,35 @@ public class TaCZIntegration {
         int entityId = sourceEntity.getId();
         long currentTick = serverLevel.getGameTime();
 
-        // Same-tick dedup with GunShootEvent
-        Long lastTick = lastProcessedTickPerEntity.get(entityId);
-        if (lastTick != null && lastTick == currentTick) {
+        // Atomic same-tick dedup with GunShootEvent
+        if (!tryClaimTick(entityId, currentTick)) {
             return;
         }
-        recordTickProcessed(entityId, currentTick);
 
-        ChunkHeatManager.onTaCZGunSound(serverLevel, sourceEntity.getX(), sourceEntity.getY(), sourceEntity.getZ(), distance, soundName);
+        double sx = sourceEntity.getX();
+        double sy = sourceEntity.getY();
+        double sz = sourceEntity.getZ();
+        if (serverLevel.getServer() != null && !serverLevel.getServer().isSameThread()) {
+            serverLevel.getServer().execute(() ->
+                    ChunkHeatManager.onTaCZGunSound(serverLevel, sx, sy, sz, distance, soundName));
+        } else {
+            ChunkHeatManager.onTaCZGunSound(serverLevel, sx, sy, sz, distance, soundName);
+        }
     }
 
-    private static void recordTickProcessed(int entityId, long tick) {
-        lastProcessedTickPerEntity.put(entityId, tick);
-        if (lastProcessedTickPerEntity.size() > 1024) {
+    private static boolean tryClaimTick(int entityId, long tick) {
+        boolean[] claimed = { false };
+        lastProcessedTickPerEntity.compute(entityId, (id, lastTick) -> {
+            if (lastTick != null && lastTick == tick) {
+                return lastTick;
+            }
+            claimed[0] = true;
+            return tick;
+        });
+        if (claimed[0] && lastProcessedTickPerEntity.size() > 1024) {
             lastProcessedTickPerEntity.entrySet().removeIf(e -> (tick - e.getValue()) > 100);
         }
+        return claimed[0];
     }
 
     public static void resetDedupForTests() {

@@ -19,6 +19,10 @@ public abstract class MixinServerLevel_playSeededSound {
             at = @At(value = "HEAD"), cancellable = true)
     public void triggerEvent(Entity pPlayer, Entity pEntity, Holder<SoundEvent> pSound, SoundSource pCategory, float pVolume, float pPitch, long pSeed, CallbackInfo ci) {
         ZombieAwareness.unitTest("15");
+        ServerLevel self = (ServerLevel)(Object)this;
+        if (pEntity == null || pSound == null || self.getServer() == null || !self.getServer().isSameThread()) {
+            return;
+        }
         ZAUtil.hookSoundEvent(pSound.value(), pEntity.level(), pEntity.getX(), pEntity.getY(), pEntity.getZ(), pVolume, pPitch);
     }
 }

@@ -2,6 +2,7 @@ package com.corosus.zombieawareness.mixin;
 
 import com.corosus.zombieawareness.compat.TaCZIntegration;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
@@ -20,6 +21,13 @@ public class MixinTaCZSoundManager {
         require = 0
     )
     private static void onSendSoundToNearby(LivingEntity sourceEntity, int distance, Identifier gunId, Identifier gunDisplayId, String soundName, float volume, float pitch, CallbackInfo ci) {
+        if (sourceEntity == null || !(sourceEntity.level() instanceof ServerLevel sl) || sl.getServer() == null) {
+            return;
+        }
+        if (!sl.getServer().isSameThread()) {
+            sl.getServer().execute(() -> TaCZIntegration.onTaCZSoundSent(sourceEntity, distance, gunId, soundName, volume, pitch));
+            return;
+        }
         TaCZIntegration.onTaCZSoundSent(sourceEntity, distance, gunId, soundName, volume, pitch);
     }
 }

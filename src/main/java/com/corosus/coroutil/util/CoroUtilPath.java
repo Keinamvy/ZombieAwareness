@@ -14,6 +14,10 @@ import java.util.Random;
 
 public class CoroUtilPath {
 
+    public static boolean isBlockChunkLoaded(Level world, int blockX, int blockZ) {
+        return world != null && world.hasChunk(blockX >> 4, blockZ >> 4);
+    }
+
     public static boolean tryMoveToEntityLivingLongDist(Mob entSource, Entity entityTo, double moveSpeedAmp) {
         return tryMoveToXYZLongDist(entSource, entityTo.getX(), entityTo.getBoundingBox().minY, entityTo.getZ(), moveSpeedAmp);
     }
@@ -41,6 +45,9 @@ public class CoroUtilPath {
 
                     int tryX = (int) Math.floor(ent.getX() + (-Math.sin((yaw + randYaw) / 180.0F * (float) Math.PI) * dist));
                     int tryZ = (int) Math.floor(ent.getZ() + (Math.cos((yaw + randYaw) / 180.0F * (float) Math.PI) * dist));
+                    if (!isBlockChunkLoaded(world, tryX, tryZ)) {
+                        return false;
+                    }
                     int tryY = world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tryX, tryZ);
 
                     BlockPos pos = new BlockPos(tryX, tryY, tryZ);

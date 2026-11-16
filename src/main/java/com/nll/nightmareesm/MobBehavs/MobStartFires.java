@@ -65,10 +65,16 @@ public class MobStartFires {
    }
 
    void StartFire(Mob M) {
+      if (M == null) {
+         return;
+      }
       BlockPos Block_Pos = M.blockPosition();
       LivingEntity Living_Entity = M.getTarget();
-      if (Living_Entity != null && Living_Entity instanceof ServerPlayer Server_Player) {
+      if (Living_Entity instanceof ServerPlayer Server_Player && MobInfo.isSameDimension(M, Server_Player)) {
          Level Lvl = MobInfo.GetMobLevel(M);
+         if (Lvl == null || Lvl.isClientSide()) {
+            return;
+         }
          boolean isDone = false;
 
          for (int x = -1; x <= 1; x++) {
@@ -76,6 +82,9 @@ public class MobStartFires {
                for (int z = -1; z <= 1; z++) {
                   if (!isDone) {
                      BlockPos Curr_Block_Pos = Block_Pos.offset(x, y, z);
+                     if (!arePosAndNeighborsLoaded(Lvl, Curr_Block_Pos)) {
+                        continue;
+                     }
                      BlockState CurrBlock_State = Lvl.getBlockState(Curr_Block_Pos);
                      Block B = CurrBlock_State.getBlock();
                      boolean canBurn = ((FireBlockAccessor)Blocks.FIRE).invokeCanBurn(CurrBlock_State) || BaseFireBlock.canBePlacedAt(Lvl, Curr_Block_Pos, Direction.NORTH);
@@ -90,11 +99,26 @@ public class MobStartFires {
       }
    }
 
+   private static boolean arePosAndNeighborsLoaded(Level lvl, BlockPos pos) {
+      if (!MobInfo.isServerPosLoaded(lvl, pos)) {
+         return false;
+      }
+      for (Direction dir : Direction.values()) {
+         if (!lvl.isLoaded(pos.relative(dir))) {
+            return false;
+         }
+      }
+      return true;
+   }
+
    boolean isNotExcluded(Block B) {
       return ConfigHelper.ConfigHasValue(ESMConfig.FlammableBlocksWhitelist, B, true);
    }
 
    void LightFire(ServerPlayer Curr_Tgt, Level Lvl, BlockPos Fire_Pos, BlockState Curr_Blockstate) {
+      if (!MobInfo.isServerPosLoaded(Lvl, Fire_Pos)) {
+         return;
+      }
       Lvl.playLocalSound(Fire_Pos.getX(), Fire_Pos.getY(), Fire_Pos.getZ(), SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, 1.0F, false);
       BlockState Block_State_Fire = BaseFireBlock.getState(Lvl, Fire_Pos);
       Lvl.setBlock(Fire_Pos, Block_State_Fire, 3);

@@ -10,8 +10,8 @@ import net.minecraft.world.level.Level;
 
 public class BloodmoonManager {
 
-    private static Boolean forcedBloodmoon = null;
-    private static long lastDuskAlertDay = -1;
+    private static volatile Boolean forcedBloodmoon = null;
+    private static volatile long lastDuskAlertDay = -1;
 
     public static void setForcedBloodmoon(Boolean forced) {
         forcedBloodmoon = forced;

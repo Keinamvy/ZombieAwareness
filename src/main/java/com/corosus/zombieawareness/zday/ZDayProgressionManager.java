@@ -12,11 +12,11 @@ import java.util.UUID;
 
 public class ZDayProgressionManager {
 
-    private static ZDayPlayerLedger ledger = new ZDayPlayerLedger();
-    private static Path ledgerPath = null;
-    private static long prevVanillaDayTime = -1L;
-    private static int forcedWorldDay = -1;
-    private static MinecraftServer currentServer = null;
+    private static volatile ZDayPlayerLedger ledger = new ZDayPlayerLedger();
+    private static volatile Path ledgerPath = null;
+    private static volatile long prevVanillaDayTime = -1L;
+    private static volatile int forcedWorldDay = -1;
+    private static volatile MinecraftServer currentServer = null;
 
     public static long advanceTickLogic(long currentActiveTicks, long prevVanillaDayTime, long currentVanillaDayTime, int onlinePlayerCount) {
         if (onlinePlayerCount <= 0) {
@@ -60,19 +60,22 @@ public class ZDayProgressionManager {
         if (ledger == null || ledgerPath == null) {
             initServer(server);
         }
+        ZDayPlayerLedger currentLedger = ledger;
         int onlineCount = server.getPlayerCount();
         long currentVanillaDayTime = server.overworld() != null ? server.overworld().getDefaultClockTime() : 0L;
         if (prevVanillaDayTime < 0L) {
             prevVanillaDayTime = currentVanillaDayTime;
         }
 
-        ledger.activePlayTicks = advanceTickLogic(ledger.activePlayTicks, prevVanillaDayTime, currentVanillaDayTime, onlineCount);
+        synchronized (currentLedger) {
+            currentLedger.activePlayTicks = advanceTickLogic(currentLedger.activePlayTicks, prevVanillaDayTime, currentVanillaDayTime, onlineCount);
+        }
         prevVanillaDayTime = currentVanillaDayTime;
 
         ZDayStage currentStage = getCurrentStage();
         int currentStageNum = currentStage.getStageNumber();
 
-        if (currentStageNum > ledger.lastBroadcastedStage) {
+        if (currentStageNum > currentLedger.lastBroadcastedStage) {
             int worldDay = getActiveWorldDay();
             String title = currentStage.getTitle();
             String desc = currentStage.getDescription();
@@ -81,9 +84,11 @@ public class ZDayProgressionManager {
             server.getPlayerList().broadcastSystemMessage(announceHeader, false);
             server.getPlayerList().broadcastSystemMessage(announceDesc, false);
 
-            ledger.lastBroadcastedStage = currentStageNum;
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                ledger.recordPlayerSeen(player.getUUID(), worldDay, currentStageNum);
+            synchronized (currentLedger) {
+                currentLedger.lastBroadcastedStage = currentStageNum;
+                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                    currentLedger.recordPlayerSeen(player.getUUID(), worldDay, currentStageNum);
+                }
             }
             saveLedger();
         } else if (server.getTickCount() % 600 == 0) {
@@ -92,24 +97,31 @@ public class ZDayProgressionManager {
     }
 
     public static void saveLedger() {
-        if (ledger != null && ledgerPath != null) {
-            ledger.forcedWorldDay = forcedWorldDay;
-            ledger.save(ledgerPath);
+        ZDayPlayerLedger currentLedger = ledger;
+        Path path = ledgerPath;
+        if (currentLedger != null && path != null) {
+            synchronized (currentLedger) {
+                currentLedger.forcedWorldDay = forcedWorldDay;
+                currentLedger.save(path);
+            }
         }
     }
 
     public static int getActiveWorldDay() {
-        if (forcedWorldDay > 0) {
-            return forcedWorldDay;
+        int forced = forcedWorldDay;
+        if (forced > 0) {
+            return forced;
         }
-        if (ledger == null) {
+        ZDayPlayerLedger currentLedger = ledger;
+        if (currentLedger == null) {
             return 1;
         }
-        return (int) (ledger.activePlayTicks / 24000L) + 1;
+        return (int) (currentLedger.activePlayTicks / 24000L) + 1;
     }
 
     public static long getActivePlayTicks() {
-        return ledger != null ? ledger.activePlayTicks : 0L;
+        ZDayPlayerLedger currentLedger = ledger;
+        return currentLedger != null ? currentLedger.activePlayTicks : 0L;
     }
 
     public static ZDayStage getCurrentStage() {
@@ -122,8 +134,11 @@ public class ZDayProgressionManager {
 
     public static void setForcedWorldDay(int day) {
         forcedWorldDay = day;
-        if (ledger != null) {
-            ledger.forcedWorldDay = day;
+        ZDayPlayerLedger currentLedger = ledger;
+        if (currentLedger != null) {
+            synchronized (currentLedger) {
+                currentLedger.forcedWorldDay = day;
+            }
             saveLedger();
         }
     }

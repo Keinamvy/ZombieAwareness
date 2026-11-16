@@ -15,12 +15,15 @@
     "MixinPlayer",
     "MixinPlaySound",
     "MixinPreventWandering",
+    "MixinRangedBowAttackGoal",
     "MixinRecomputePath",
     "MixinServerLevel_playSeededSound",
     "MixinServerPlayerGameMode",
     "MixinServerPlayerSleep",
     "MixinTaCZSoundManager",
-    "MixinTargettingFabric"
+    "MixinTargettingFabric",
+    "MixinAbstractSkeleton",
+    "MixinWarden"
   ],
   "client": [
     "MixinIntegratedServer",

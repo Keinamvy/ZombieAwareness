@@ -1,5 +1,6 @@
 package com.nll.nightmareesm;
 
+import com.corosus.zombieawareness.ZAUtil;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.server.MinecraftServer;
@@ -65,19 +66,24 @@ public class GetNearestTarget {
 
    List<Entity> GetNearbyEntities(PlayerList Player_List, Entity Attacker) {
       List<Entity> Compiled_Entities = new ArrayList<>();
+      if (Attacker == null) {
+         return Compiled_Entities;
+      }
       List<ServerPlayer> All_Players = Player_List.getPlayers();
-      int AllPlayerCount = Player_List.getPlayerCount();
+      int AllPlayerCount = All_Players.size();
       int AlivePlayerCount = 0;
 
       for (int i = 0; i < AllPlayerCount; i++) {
          ServerPlayer Plyr = All_Players.get(i);
-         if (isValidSurvivalPlayerTarget(Plyr.isCreative(), Plyr.isSpectator()) && Plyr.isAlive()) {
+         if (MobInfo.isSameDimension(Plyr, Attacker)
+            && isValidSurvivalPlayerTarget(Plyr.isCreative(), Plyr.isSpectator())
+            && Plyr.isAlive()) {
             Compiled_Entities.add(Plyr);
             AlivePlayerCount++;
          }
       }
 
-      if (AlivePlayerCount == 0 && (Boolean)ESMConfig.isMonstersTargetVillagers.get()) {
+      if (AlivePlayerCount == 0 && (Boolean)ESMConfig.isMonstersTargetVillagers.get() && !ZAUtil.isHordeMob(Attacker) && Attacker instanceof Mob Mob_Attacker) {
          double Attacker_Y = Attacker.getY();
          double AttackDist = ((Integer)ESMConfig.MonsterAttackDistanceAboveGround.get()).intValue();
          if (Attacker_Y < 50.0) {
@@ -85,14 +91,15 @@ public class GetNearestTarget {
          }
 
          TargetingConditions Tgt = TargetingConditions.forCombat().range(AttackDist);
-         Mob Mob_Attacker = (Mob)Attacker;
          Level Lvl = MobInfo.GetMobLevel(Mob_Attacker);
-         List<Villager> All_Nearby_Entities = Lvl.getEntitiesOfClass(Villager.class, Attacker.getBoundingBox().inflate(AttackDist, AttackDist, AttackDist));
+         if (Lvl != null && !Lvl.isClientSide()) {
+            List<Villager> All_Nearby_Entities = Lvl.getEntitiesOfClass(Villager.class, Attacker.getBoundingBox().inflate(AttackDist, AttackDist, AttackDist));
 
-         for (int i = 0; i < All_Nearby_Entities.size(); i++) {
-            Villager Curr_Villager = All_Nearby_Entities.get(i);
-            Entity Entity_Villager = Curr_Villager;
-            Compiled_Entities.add(Entity_Villager);
+            for (int i = 0; i < All_Nearby_Entities.size(); i++) {
+               Villager Curr_Villager = All_Nearby_Entities.get(i);
+               Entity Entity_Villager = Curr_Villager;
+               Compiled_Entities.add(Entity_Villager);
+            }
          }
       }
 

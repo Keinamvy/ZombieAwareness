@@ -11,15 +11,19 @@ import net.minecraft.world.level.block.Block;
 
 public class MobDigDown {
    public MobDigDown(Mob M) {
+      if (M == null) {
+         return;
+      }
       Entity M_Entity = M;
       if (!M.isSwinging()) {
          BlockPos Zombie_Pos = M_Entity.blockPosition();
          Entity Tgt = M.getTarget();
-         if (Tgt != null && Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && !Server_Player.isSpectator()
+         if (Tgt instanceof ServerPlayer Server_Player && MobInfo.isSameDimension(M, Server_Player)
+               && !Server_Player.isCreative() && !Server_Player.isSpectator()
                && this.isTargetUnderMonster(M, Tgt) && this.isCloseEnough(M, Tgt)) {
             BlockPos Under_BlockPos = Zombie_Pos.below();
             Level Lvl = MobInfo.GetMobLevel(M);
-            if (Lvl != null) {
+            if (MobInfo.isServerPosLoaded(Lvl, Under_BlockPos)) {
                Block Dmg_Block = Lvl.getBlockState(Under_BlockPos).getBlock();
                new MobDamageBlock(M_Entity, Dmg_Block, Under_BlockPos);
             }

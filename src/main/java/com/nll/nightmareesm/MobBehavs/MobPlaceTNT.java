@@ -21,24 +21,30 @@ public class MobPlaceTNT {
    private static final Logger LOGGER = LogManager.getLogger();
    private static final Map<UUID, Long> lastTntPlacedTick = new ConcurrentHashMap<>();
 
+   private static final long TNT_COOLDOWN_TICKS = 200L;
+   private static final int MAX_COOLDOWN_ENTRIES = 512;
+
    public MobPlaceTNT(Entity Entity_Class) {
-      if (Entity_Class == null) {
+      if (!(Entity_Class instanceof Mob Mob_Entity)) {
          return;
       }
-      Mob Mob_Entity = (Mob)Entity_Class;
       ServerLevel Lvl = MobInfo.GetMobServerLevel(Mob_Entity);
       if (Lvl == null) {
          return;
       }
 
       long gameTime = Lvl.getGameTime();
+      if (lastTntPlacedTick.size() > MAX_COOLDOWN_ENTRIES) {
+         lastTntPlacedTick.entrySet().removeIf(e -> gameTime < e.getValue() || (gameTime - e.getValue()) >= TNT_COOLDOWN_TICKS);
+      }
       Long lastTick = lastTntPlacedTick.get(Entity_Class.getUUID());
-      if (lastTick != null && gameTime - lastTick < 200L) {
+      if (lastTick != null && gameTime >= lastTick && (gameTime - lastTick) < TNT_COOLDOWN_TICKS) {
          return;
       }
 
       Entity Nearest_Entity = new GetNearestTarget().Get(Entity_Class);
-      if (Nearest_Entity != null && this.CanPlaceThisTick(Entity_Class) && this.isCloseEnough(Nearest_Entity, Entity_Class)) {
+      if (Nearest_Entity != null && MobInfo.isSameDimension(Nearest_Entity, Entity_Class)
+            && this.CanPlaceThisTick(Entity_Class) && this.isCloseEnough(Nearest_Entity, Entity_Class)) {
          lastTntPlacedTick.put(Entity_Class.getUUID(), gameTime);
          BlockPos Entity_Block_Pos = Entity_Class.blockPosition();
          PrimedTnt New_TNT = new PrimedTnt(Lvl, Entity_Block_Pos.getX() + 0.5, Entity_Block_Pos.getY(), Entity_Block_Pos.getZ() + 0.5, Mob_Entity);

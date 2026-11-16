@@ -6,6 +6,8 @@ import com.corosus.zombieawareness.client.SoundRegistry;
 import com.corosus.zombieawareness.config.ZAConfigFeatures;
 import com.corosus.zombieawareness.config.ZAConfigGeneral;
 import com.corosus.zombieawareness.config.ZAConfigPlayerLists;
+import com.corosus.zombieawareness.config.ZAConfigZDay;
+import com.corosus.zombieawareness.heat.ChunkHeatManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -14,9 +16,12 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Mth;
 import net.minecraft.util.profiling.Profiler;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -29,6 +34,8 @@ import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.skeleton.Skeleton;
 import net.minecraft.world.entity.monster.spider.Spider;
 import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.entity.npc.Npc;
+import net.minecraft.world.entity.npc.villager.AbstractVillager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -47,29 +54,30 @@ import org.joml.Vector3d;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class ZAUtil {
     
     public static Random rand = new Random();
     
-    public static HashMap<String, Integer> lastHealths = new HashMap();
-    public static HashMap<String, Long> lastBleedTimes = new HashMap();
+    public static Map<String, Integer> lastHealths = new ConcurrentHashMap<>();
+    public static Map<String, Long> lastBleedTimes = new ConcurrentHashMap<>();
 
-    public static List<SoundProfileEntry> listSoundProfiles = new ArrayList<>();
+    public static List<SoundProfileEntry> listSoundProfiles = new CopyOnWriteArrayList<>();
 
 	//runtime cache lookups, populates as sounds are made, useful for partial matches that require iterating entire sound profile list each time
-	public static HashMap<String, SoundProfileEntry> lookupSoundNameToProfileCache = new HashMap<>();
-	public static HashMap<Integer, SoundProfileEntry> lookupSoundIntToProfile = new HashMap<>();
+	public static Map<String, SoundProfileEntry> lookupSoundNameToProfileCache = new ConcurrentHashMap<>();
+	public static Map<Integer, SoundProfileEntry> lookupSoundIntToProfile = new ConcurrentHashMap<>();
 
-    public static WeakHashMap<Entity, Long> lookupLastAlertTime = new WeakHashMap<>();
+    public static Map<Entity, Long> lookupLastAlertTime = Collections.synchronizedMap(new WeakHashMap<>());
     public static long alertDelay = 60*20;
     
-    public static WeakHashMap<Entity, Long> lookupLastInvestigateTime = new WeakHashMap<>();
+    public static Map<Entity, Long> lookupLastInvestigateTime = Collections.synchronizedMap(new WeakHashMap<>());
     public static long investigateDelay = 60*20;
 
-	public static HashMap<String, Long> lookupLastWaypointTime = new HashMap<>();
+	public static Map<String, Long> lookupLastWaypointTime = new ConcurrentHashMap<>();
 
-	public static HashMap<EntityType, Boolean> lookupTickableEntitiesCache = new HashMap<>();
+	public static Map<EntityType, Boolean> lookupTickableEntitiesCache = new ConcurrentHashMap<>();
 
 	public static String SPEED_BOOST_TAG = "za_speedbosted";
 	public static String ZA_LAST_ACTION = "za_last_action";
@@ -78,10 +86,12 @@ public class ZAUtil {
     public static final float NECROTIC_REGEN_EFFICIENCY = 0.50f; // Reduces healing/regeneration efficiency by 50%
     public static final long NECROTIC_TRAUMA_DURATION_TICKS = 160L; // 8 seconds
     public static final float HORDE_MOB_LOOT_DROP_CHANCE = 0.20f; // Only 20% of horde mobs drop loot (80% drop reduction)
+    public static final String DAMAGE_CLONE_TAG = "za_damage_clone";
 
     private static long lastDistressScentTick = -9999L;
 
     private static final Map<UUID, Long> necroticTraumaUntilTick = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> lastDamageCloneTickMap = new ConcurrentHashMap<>();
 
     public static boolean debug = false;
     
@@ -90,13 +100,13 @@ public class ZAUtil {
 		//addSoundHooks();
     }
 
-	public static void initSoundHookDataIfEmpty() {
-		if (listSoundProfiles.size() == 0) {
+	public static synchronized void initSoundHookDataIfEmpty() {
+		if (listSoundProfiles.isEmpty()) {
 			addSoundHooks();
 		}
 	}
 
-	public static void addSoundHooks() {
+	public static synchronized void addSoundHooks() {
 		int noisyInteractRange = 30;
 		double noisyInteractBuff = 1.3D;
 
@@ -282,7 +292,9 @@ public class ZAUtil {
             if((int)player.getHealth() != lastHealth) {
                 if(player.getHealth() < lastHealth) {
                 	EntityScent scent = spawnOrBuffSenseAtPos(player.level(), pos, EnumSenseType.SCENT_BLOOD, ZAConfigGeneral.scentStrength);
-                	ZombieAwareness.dbg("spawned or buffed scent sense from damage: " + scent.getStrengthPeak());
+                	if (scent != null) {
+                		ZombieAwareness.dbg("spawned or buffed scent sense from damage: " + scent.getStrengthPeak());
+                	}
                 }
 
                 lastHealth = (int) player.getHealth();
@@ -294,7 +306,9 @@ public class ZAUtil {
                 lastBleedTime = System.currentTimeMillis() + 30000L;
                 lastBleedTimes.put(CoroUtilEntity.getName(player), lastBleedTime);
                 EntityScent scent = spawnOrBuffSenseAtPos(player.level(), pos, EnumSenseType.SCENT_BLOOD, ZAConfigGeneral.scentStrength);
-                ZombieAwareness.dbg("spawned or buffed scent sense from bleeding: " + scent.getStrengthPeak());
+                if (scent != null) {
+                	ZombieAwareness.dbg("spawned or buffed scent sense from bleeding: " + scent.getStrengthPeak());
+                }
             }
         }
     }
@@ -311,11 +325,13 @@ public class ZAUtil {
 	}
 
 	public static boolean isMobSpeedBosted(Mob ent) {
-		return ZombieAwareness.instance().getPersistentData(ent).getBooleanOr(SPEED_BOOST_TAG, false);
-		//return ent.getPersistentData().getBoolean(SPEED_BOOST_TAG);
+		return ZombieAwareness.getPersistentDataSafe(ent).getBooleanOr(SPEED_BOOST_TAG, false);
 	}
 	
 	public static void giveRandomSpeedBoost(Mob ent) {
+		if (ent == null || ent.entityTags().contains(TANKER_TAG)) {
+			return;
+		}
 		if (ZAConfigGeneral.zombieRandSpeedBoost > 0) {
 			double randBoost = CU.rand().nextDouble() * ZAConfigGeneral.zombieRandSpeedBoost;
 			if (ent.isBaby()) {
@@ -325,7 +341,7 @@ public class ZAUtil {
             if (!ent.getAttribute(Attributes.MOVEMENT_SPEED).hasModifier(CoroUtilAttributes.SPEED_BOOST_ID)) {
 				ZombieAwareness.dbg("boosting zombie speed to " + randBoost);
                 ent.getAttribute(Attributes.MOVEMENT_SPEED).addPermanentModifier(speedBoostModifier);
-				ZombieAwareness.instance().getPersistentData(ent).putBoolean(SPEED_BOOST_TAG, true);
+				ZombieAwareness.getPersistentDataSafe(ent).putBoolean(SPEED_BOOST_TAG, true);
             }
 		}
 	}
@@ -347,15 +363,80 @@ public class ZAUtil {
 		return entity instanceof Enemy || entity instanceof Monster;
 	}
 
+	public static final String TANKER_TAG = "za_tanker";
+	public static final String BLOODMOON_WARDEN_TAG = "za_bloodmoon_warden";
+	public static final String KNIGHT_TAG = "za_knight";
+	public static final String KNIGHT_MOUNT_TAG = "za_knight_mount";
+	public static final String RAMPAGE_TAG = "za_rampage";
+	public static final String LABELED_MOB_TAG = "za_labeled_mob";
+
+	private static final Set<String> HORDE_MOB_TAGS = Set.of(
+			"za_horde_mob",
+			"za_tnt_sapper",
+			"za_juggernaut",
+			"za_crawler",
+			"za_apex_corrosive",
+			"za_screamer",
+			"za_airdrop_passenger",
+			TANKER_TAG,
+			BLOODMOON_WARDEN_TAG,
+			KNIGHT_TAG,
+			KNIGHT_MOUNT_TAG,
+			RAMPAGE_TAG
+	);
+
+	public static boolean hasHordeMobTag(Collection<String> tags) {
+		if (tags == null || tags.isEmpty()) {
+			return false;
+		}
+		for (String tag : HORDE_MOB_TAGS) {
+			if (tags.contains(tag)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public static boolean isHordeMob(Entity entity) {
+		return entity != null && hasHordeMobTag(entity.entityTags());
+	}
+
+	public static boolean isVillagerEntity(Entity entity) {
+		return entity instanceof AbstractVillager || entity instanceof Npc;
+	}
+
+	/**
+	 * Pure policy predicate used to keep horde mobs focused on players instead of infighting or targeting villagers.
+	 */
+	public static boolean shouldBlockHordeMobTarget(boolean attackerIsHordeMob, boolean targetIsVillager, boolean targetIsHostile) {
+		if (targetIsHostile) {
+			return true;
+		}
+		return attackerIsHordeMob && targetIsVillager;
+	}
+
+	public static boolean shouldBlockHordeTarget(Entity attacker, Entity target) {
+		if (shouldBlockHostileFriendlyFireOrAggro(attacker, target)) {
+			return true;
+		}
+		return isHordeMob(attacker) && isVillagerEntity(target);
+	}
+
+	public static boolean shouldBlockWardenFriendlyAction(boolean wardenIsHorde, boolean targetIsHorde, boolean targetIsHostile, boolean targetIsVillager) {
+		return wardenIsHorde && (targetIsHorde || targetIsHostile || targetIsVillager);
+	}
+
 	public static boolean shouldBlockHostileFriendlyFireOrAggro(Entity sourceOrAttacker, Entity victim) {
 		if (sourceOrAttacker == null || victim == null) {
 			return false;
 		}
-		if (isHostileMob(victim)) {
-			if (isHostileMob(sourceOrAttacker)) {
+		if (isHostileMob(victim) || isHordeMob(victim)) {
+			if (isHostileMob(sourceOrAttacker) || isHordeMob(sourceOrAttacker)) {
 				return true;
 			}
-			if (sourceOrAttacker instanceof PrimedTnt tnt && (tnt.entityTags().contains("za_sapper_tnt") || isHostileMob(tnt.getOwner()))) {
+			if (sourceOrAttacker instanceof PrimedTnt tnt && (tnt.entityTags().contains("za_sapper_tnt")
+					|| isHostileMob(tnt.getOwner())
+					|| isHordeMob(tnt.getOwner()))) {
 				return true;
 			}
 		}
@@ -390,7 +471,7 @@ public class ZAUtil {
 	public static void markPerformedPathing(Mob ent) {
 		//setting to 100+ prevents random pathing from cancelling our path, not entirely though, a mixin does this instead now
 		ent.setNoActionTime(0);
-		ZombieAwareness.instance().getPersistentData(ent).putLong(ZA_LAST_ACTION, ent.level().getGameTime());
+		ZombieAwareness.getPersistentDataSafe(ent).putLong(ZA_LAST_ACTION, ent.level().getGameTime());
 	}
     
     public static void tickAI(Mob ent) {
@@ -398,9 +479,14 @@ public class ZAUtil {
 		//ZAConfig.debugConsoleSuperDetailed = false;
 		if (!ZAUtil.isZombieAwarenessActive(ent.level())) return;
 
+		boolean hordeMob = isHordeMob(ent);
+		if (hordeMob && ent.getTarget() != null && isVillagerEntity(ent.getTarget())) {
+			ent.setTarget(null);
+		}
+
     	if (ZAConfigGeneral.debugConsoleSuperDetailed) ZombieAwareness.dbg("ZA DBG: Ticking: " + ent);
 
-		long lastActionTime = ZombieAwareness.instance().getPersistentData(ent).getLongOr(ZA_LAST_ACTION, 0L);
+		long lastActionTime = ZombieAwareness.getPersistentDataSafe(ent).getLongOr(ZA_LAST_ACTION, 0L);
 		if (lastActionTime > 0 && ent.level().getGameTime() - ZAConfigGeneral.tickCooldownBetweenPathfinds < lastActionTime) return;
 
 		//if (ent.getNoActionTime() <= 40) return;
@@ -408,7 +494,15 @@ public class ZAUtil {
     	//A more performance friendly omniscient, only runs it when no target, but still allows for smaller ranged retargetting
 		//adding entity ID onto world time to stagger processing per entity more, should improve TPS
     	if ((ent.level().getGameTime() + ent.getId()) % 40 == 0) {
-	    	if (ZAConfigGeneral.omniscient && ent.getTarget() == null) {
+			if (hordeMob && ent.getTarget() == null) {
+				ServerPlayer hordeTarget = ChunkHeatManager.resolveHordeTargetPlayer(ent);
+				if (hordeTarget != null) {
+					huntTarget(ent, hordeTarget);
+					markPerformedPathing(ent);
+				} else {
+					ai_FindTarget(ent, true);
+				}
+			} else if (ZAConfigGeneral.omniscient && ent.getTarget() == null) {
 	    		ai_FindTarget(ent, true);
 	    	} else {
 	    		ai_FindTarget(ent, false);
@@ -643,6 +737,14 @@ public class ZAUtil {
         return bestEnt;
     }
 
+	public static boolean isSafeServerLevelDispatch(boolean isServerLevel, boolean hasServer, boolean isSameThread) {
+		return isServerLevel && hasServer && isSameThread;
+	}
+
+	public static boolean isServerMainThread(Level world) {
+		return world instanceof ServerLevel sl && isSafeServerLevelDispatch(true, sl.getServer() != null, sl.getServer() != null && sl.getServer().isSameThread());
+	}
+
 	public static void hookPlayEvent(int type, Level world, double pX, double pY, double pZ, int data) {
 
 		//TODO: TEMP DEBUG!!!
@@ -651,7 +753,7 @@ public class ZAUtil {
 		initSoundHookDataIfEmpty();
 
 		//if event type is for playing a record
-		if (world.isClientSide() || !canSpawnTraceQuickCheck(world)) return;
+		if (world == null || world.isClientSide() || !isServerMainThread(world) || !canSpawnTraceQuickCheck(world)) return;
 
 		SoundProfileEntry entry = getSoundIDEntry(type);
 		if (entry != null) {
@@ -682,7 +784,7 @@ public class ZAUtil {
 
 		initSoundHookDataIfEmpty();
     	
-    	if (world.isClientSide() || sound == null || !canSpawnTraceQuickCheck(world)) return;
+    	if (world == null || world.isClientSide() || sound == null || !isServerMainThread(world) || !canSpawnTraceQuickCheck(world)) return;
 
 		Identifier soundId = sound.location();
 		if (world instanceof ServerLevel serverLevel && soundId != null) {
@@ -716,8 +818,9 @@ public class ZAUtil {
 				strength *= entry.getMultiplier();
 
 				EntityScent scent = spawnOrBuffSenseAtPos(world, pos, EnumSenseType.SOUND, (int)strength);
-
-				ZombieAwareness.dbg("spawned or buffed sound sense from soundEvent, sound: " + entry.getSoundName() + ", str: " + scent.getStrengthPeak()/* + ", vol: " + volume*/);
+				if (scent != null) {
+					ZombieAwareness.dbg("spawned or buffed sound sense from soundEvent, sound: " + entry.getSoundName() + ", str: " + scent.getStrengthPeak()/* + ", vol: " + volume*/);
+				}
 			}
 		}
 	}
@@ -727,14 +830,15 @@ public class ZAUtil {
     	
     	if (player == null || (ZAConfigPlayerLists.whiteListUsedSenses && !ZAConfigPlayerLists.whitelistSenses.contains(CoroUtilEntity.getName(player)))) return;
     	
-		if (!player.level().isClientSide() && CU.rand().nextInt(chance) == 0) {
+		if (!player.level().isClientSide() && isServerMainThread(player.level()) && CU.rand().nextInt(chance) == 0) {
 
 			int strength = ZAConfigGeneral.soundStrength;
 			Vector3d pos = new Vector3d(player.getX(), player.getY(), player.getZ());
 
 			EntityScent scent = spawnOrBuffSenseAtPos(player.level(), pos, EnumSenseType.SOUND, strength);
-
-			ZombieAwareness.dbg("spawned or buffed sound sense from PlayerEvent: " + scent.getStrengthPeak());
+			if (scent != null) {
+				ZombieAwareness.dbg("spawned or buffed sound sense from PlayerEvent: " + scent.getStrengthPeak());
+			}
 		}
     }
 
@@ -755,14 +859,15 @@ public class ZAUtil {
 			if (ZAConfigPlayerLists.whitelistSenses.contains(CoroUtilEntity.getName(player))) return;
 		}
 
-		if (!world.isClientSide() && CU.rand().nextInt(chance) == 0) {
+		if (!world.isClientSide() && isServerMainThread(world) && CU.rand().nextInt(chance) == 0) {
 
 			int strength = ZAConfigGeneral.soundStrength;
 			Vector3d posVec = new Vector3d(pos.getX(), pos.getY(), pos.getZ());
 
 			EntityScent scent = spawnOrBuffSenseAtPos(world, posVec, EnumSenseType.SOUND, strength);
-
-			ZombieAwareness.dbg("spawned or buffed sound sense from BlockBasedEvent: " + scent.getStrengthPeak());
+			if (scent != null) {
+				ZombieAwareness.dbg("spawned or buffed sound sense from BlockBasedEvent: " + scent.getStrengthPeak());
+			}
 		}
 	}
 
@@ -789,11 +894,17 @@ public class ZAUtil {
     }
     
     public static void spawnWaypoint(Entity entSource) {
+        if (entSource == null || entSource.level() == null || !isServerMainThread(entSource.level())) {
+            return;
+        }
         int range = 128;
         
         double tryX = (int)entSource.getX() - (range/2) + (rand.nextInt(range));
         double tryZ = (int)entSource.getZ() - (range/2) + (rand.nextInt(range));
-        double tryY = entSource.level().getHeight(Heightmap.Types.MOTION_BLOCKING, (int)Math.floor(tryX), (int)Math.floor(tryZ));
+        if (!entSource.level().hasChunk(Mth.floor(tryX) >> 4, Mth.floor(tryZ) >> 4)) {
+            return;
+        }
+        double tryY = entSource.level().getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(tryX), Mth.floor(tryZ));
 
         if (!canSpawnTrace(entSource.level(), tryX, tryY, tryZ)) {
             return;
@@ -920,6 +1031,12 @@ public class ZAUtil {
      * @return
      */
     public static EntityScent spawnOrBuffSenseAtPos(Level world, Vector3d parPos, EnumSenseType type, int strength, boolean frequentSoundMultiply) {
+		if (world == null || parPos == null || !isServerMainThread(world)) {
+			return null;
+		}
+		if (!world.isLoaded(CoroUtilBlock.blockPos(parPos.x, parPos.y, parPos.z))) {
+			return null;
+		}
 		
     	EntityScent sense = getSenseNodeAtPos(world, parPos, type);
     	
@@ -1090,5 +1207,163 @@ public class ZAUtil {
             return true;
         }
         return randomZeroToOne < HORDE_MOB_LOOT_DROP_CHANCE;
+    }
+
+    public static void resetDamageCloneState() {
+        lastDamageCloneTickMap.clear();
+    }
+
+    public static boolean canTriggerDamageClone(
+            boolean isHostileMob,
+            boolean isAlive,
+            boolean hasCloneTag,
+            boolean hasAttackerEntity,
+            float damageAmount,
+            long lastCloneTick,
+            long currentTick,
+            long cooldownTicks,
+            int nearbyMobCount,
+            int maxNearbyMobs,
+            double cloneChance,
+            double randomZeroToOne) {
+        if (!isHostileMob || !isAlive || hasCloneTag || !hasAttackerEntity || damageAmount <= 0.0f) {
+            return false;
+        }
+        if (cloneChance <= 0.0) {
+            return false;
+        }
+        if (lastCloneTick >= 0L && (currentTick - lastCloneTick) < Math.max(0L, cooldownTicks)) {
+            return false;
+        }
+        if (maxNearbyMobs > 0 && nearbyMobCount >= maxNearbyMobs) {
+            return false;
+        }
+        return randomZeroToOne < cloneChance;
+    }
+
+    public static int trySpawnDamageClones(ServerLevel level, Mob mob, DamageSource source, float amount) {
+        if (level == null || mob == null || source == null || ZAConfigZDay.mobDamageCloneCount <= 0) {
+            return 0;
+        }
+        if (level.getServer() == null || !level.getServer().isSameThread() || !level.isLoaded(mob.blockPosition())) {
+            return 0;
+        }
+        long gameTime = level.getGameTime();
+        long lastCloneTick = lastDamageCloneTickMap.getOrDefault(mob.getUUID(), -1L);
+        int nearbyHostiles = level.getEntitiesOfClass(
+                Mob.class,
+                mob.getBoundingBox().inflate(24.0, 12.0, 24.0),
+                m -> m != null && m.isAlive() && isHostileMob(m)
+        ).size();
+
+        boolean allowed = canTriggerDamageClone(
+                isHostileMob(mob),
+                mob.isAlive() && !mob.isRemoved(),
+                mob.entityTags().contains(DAMAGE_CLONE_TAG),
+                source.getEntity() != null,
+                amount,
+                lastCloneTick,
+                gameTime,
+                ZAConfigZDay.mobDamageCloneCooldownTicks,
+                nearbyHostiles,
+                ZAConfigZDay.mobDamageCloneMaxNearby,
+                ZAConfigZDay.mobDamageCloneChance,
+                level.getRandom().nextDouble()
+        );
+        if (!allowed) {
+            return 0;
+        }
+
+        if (lastDamageCloneTickMap.size() > 4096) {
+            long expiry = Math.max(200L, ZAConfigZDay.mobDamageCloneCooldownTicks);
+            lastDamageCloneTickMap.entrySet().removeIf(e -> (gameTime - e.getValue()) > expiry);
+        }
+        lastDamageCloneTickMap.put(mob.getUUID(), gameTime);
+
+        boolean parentIsHorde = isHordeMob(mob);
+        boolean parentIsApex = mob.entityTags().contains("za_apex_corrosive");
+        LivingEntity preferredTarget = mob.getTarget();
+        if (preferredTarget != null && (!preferredTarget.isAlive() || shouldBlockHordeTarget(mob, preferredTarget))) {
+            preferredTarget = null;
+        }
+        if (preferredTarget == null && source.getEntity() instanceof LivingEntity attacker && attacker.isAlive()
+                && !shouldBlockHordeTarget(mob, attacker)) {
+            preferredTarget = attacker;
+        }
+        if (preferredTarget == null && parentIsHorde) {
+            preferredTarget = ChunkHeatManager.resolveHordeTargetPlayer(level, mob.getX(), mob.getY(), mob.getZ());
+        }
+
+        int spawned = 0;
+        int targetClones = ZAConfigZDay.mobDamageCloneCount;
+        for (int i = 0; i < targetClones; i++) {
+            try {
+                Entity created = mob.getType().create(level, EntitySpawnReason.MOB_SUMMONED);
+                if (!(created instanceof Mob clone)) {
+                    continue;
+                }
+                double spawnX = mob.getX();
+                double spawnY = mob.getY();
+                double spawnZ = mob.getZ();
+                BlockPos safePos = findSafeNearbyClonePos(level, mob.blockPosition(), level.getRandom());
+                if (safePos != null) {
+                    spawnX = safePos.getX() + 0.5;
+                    spawnY = safePos.getY();
+                    spawnZ = safePos.getZ() + 0.5;
+                }
+
+                clone.setPos(spawnX, spawnY, spawnZ);
+                if (!level.isLoaded(clone.blockPosition())) {
+                    continue;
+                }
+                clone.addTag(DAMAGE_CLONE_TAG);
+                if (parentIsHorde) {
+                    clone.addTag("za_horde_mob");
+                    if (parentIsApex) {
+                        clone.addTag("za_apex_corrosive");
+                    }
+                }
+                try {
+                    clone.finalizeSpawn(level, level.getCurrentDifficultyAt(clone.blockPosition()), EntitySpawnReason.MOB_SUMMONED, null);
+                } catch (Throwable ignored) {}
+                if (parentIsHorde) {
+                    ChunkHeatManager.applyHordeMobHealthScaling(clone);
+                }
+                if (preferredTarget != null && preferredTarget.isAlive() && !shouldBlockHordeTarget(clone, preferredTarget)) {
+                    clone.setTarget(preferredTarget);
+                }
+                if (level.addFreshEntity(clone)) {
+                    spawned++;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return spawned;
+    }
+
+    private static BlockPos findSafeNearbyClonePos(ServerLevel level, BlockPos origin, net.minecraft.util.RandomSource rand) {
+        if (level == null || origin == null || rand == null) {
+            return null;
+        }
+        for (int attempt = 0; attempt < 8; attempt++) {
+            int dx = rand.nextInt(5) - 2;
+            int dz = rand.nextInt(5) - 2;
+            if (dx == 0 && dz == 0) {
+                continue;
+            }
+            for (int dy = -1; dy <= 2; dy++) {
+                BlockPos feet = origin.offset(dx, dy, dz);
+                BlockPos head = feet.above();
+                BlockPos below = feet.below();
+                if (!level.isLoaded(feet)) {
+                    continue;
+                }
+                if (level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
+                        && level.getBlockState(head).getCollisionShape(level, head).isEmpty()
+                        && !level.getBlockState(below).getCollisionShape(level, below).isEmpty()) {
+                    return feet;
+                }
+            }
+        }
+        return null;
     }
 }

@@ -2,6 +2,7 @@ package com.corosus.zombieawareness.heat;
 
 import com.corosus.zombieawareness.ZAUtil;
 import com.corosus.zombieawareness.bloodmoon.BloodmoonManager;
+import com.corosus.zombieawareness.config.ZAConfigZDay;
 import com.corosus.zombieawareness.zday.ZDayProgressionManager;
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.AfterEach;
@@ -178,48 +179,70 @@ public class ChunkHeatAndBloodmoonTest {
 
     @Test
     public void hordeDurationScalesWithNearbyPlayerCount() {
-        assertEquals(3600, ChunkHeatManager.computeHordeDurationTicks(1), "1 player should yield 3600 ticks (3 minutes)");
-        assertEquals(4800, ChunkHeatManager.computeHordeDurationTicks(3), "3 players should yield 4800 ticks (3 min + 2x30s)");
-        assertEquals(3600, ChunkHeatManager.computeHordeDurationTicks(0), "0 players fallback should yield 3600 ticks");
+        assertEquals(6000, ZAConfigZDay.hordeBaseDurationTicks, "Default base main horde timer must be 6000 ticks (5 minutes)");
+        assertEquals(6000, ChunkHeatManager.DEFAULT_HORDE_BASE_DURATION_TICKS, "DEFAULT_HORDE_BASE_DURATION_TICKS must be 6000 ticks");
+        assertEquals(6000, ChunkHeatManager.computeHordeDurationTicks(1), "1 player should yield 6000 ticks (5 minutes)");
+        assertEquals(7200, ChunkHeatManager.computeHordeDurationTicks(3), "3 players should yield 7200 ticks (5 min + 2x30s)");
+        assertEquals(6000, ChunkHeatManager.computeHordeDurationTicks(0), "0 players fallback should yield 6000 ticks");
+
+        int prevBase = ZAConfigZDay.hordeBaseDurationTicks;
+        try {
+            ZAConfigZDay.hordeBaseDurationTicks = 0;
+            assertEquals(6000, ChunkHeatManager.computeHordeDurationTicks(1), "Non-positive config should fall back to 6000 ticks");
+        } finally {
+            ZAConfigZDay.hordeBaseDurationTicks = prevBase;
+        }
     }
 
     @Test
     public void hordePhaseResolvesAndRespectsWorldStageCaps() {
+        // Extended Phase 4 (0.45..0.72 = 27%) & Phase 5 (0.72..1.00 = 28%) must each exceed Phases 1A (10%), 1B (10%), 2 (12%), 3 (13%)
+        double p1aShare = ChunkHeatManager.PHASE_1A_END;
+        double p1bShare = ChunkHeatManager.PHASE_1B_END - ChunkHeatManager.PHASE_1A_END;
+        double p2Share = ChunkHeatManager.PHASE_2_END - ChunkHeatManager.PHASE_1B_END;
+        double p3Share = ChunkHeatManager.PHASE_3_END - ChunkHeatManager.PHASE_2_END;
+        double p4Share = ChunkHeatManager.PHASE_4_END - ChunkHeatManager.PHASE_3_END;
+        double p5Share = 1.0 - ChunkHeatManager.PHASE_4_END;
+        assertTrue(p4Share > p1aShare && p4Share > p1bShare && p4Share > p2Share && p4Share > p3Share,
+                "Phase 4 share must exceed every earlier phase share");
+        assertTrue(p5Share > p1aShare && p5Share > p1bShare && p5Share > p2Share && p5Share > p3Share,
+                "Phase 5 share must exceed every earlier phase share");
+
         // Progress 0.05 -> Phase 1A (uncapped across all stages)
         assertEquals(ChunkHeatManager.HordePhase.PHASE_1A_FAST_ZOMBIES, ChunkHeatManager.resolveHordePhase(0.05, 2));
         assertEquals(ChunkHeatManager.HordePhase.PHASE_1A_FAST_ZOMBIES, ChunkHeatManager.resolveHordePhase(0.05, 6));
         assertEquals(ChunkHeatManager.HordePhase.PHASE_1A_FAST_ZOMBIES, ChunkHeatManager.resolveHordePhase(0.05, 9));
         assertEquals(ChunkHeatManager.HordePhase.PHASE_1A_FAST_ZOMBIES, ChunkHeatManager.resolveHordePhase(0.05, 10));
 
-        // Progress 0.25 -> Phase 1B (uncapped across all stages)
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.25, 2));
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.25, 6));
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.25, 9));
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.25, 10));
+        // Progress 0.15 -> Phase 1B (uncapped across all stages)
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.15, 2));
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.15, 6));
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.15, 9));
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.15, 10));
 
-        // Progress 0.50 -> Raw Phase 2 (Breachers)
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.50, 2), "Stage 2 must cap at Phase 1B");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.50, 6));
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.50, 9));
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.50, 10));
+        // Progress 0.25 -> Raw Phase 2 (Breachers)
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.25, 2), "Stage 2 must cap at Phase 1B");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.25, 6));
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.25, 9));
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.25, 10));
 
-        // Progress 0.70 -> Raw Phase 3 (Juggernauts)
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.70, 2), "Stage 2 must cap at Phase 1B");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.70, 6), "Stage 6 must cap at Phase 2");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.70, 9));
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.70, 10));
+        // Progress 0.38 -> Raw Phase 3 (Juggernauts)
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.38, 2), "Stage 2 must cap at Phase 1B");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.38, 6), "Stage 6 must cap at Phase 2");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.38, 9));
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.38, 10));
 
-        // Progress 0.90 -> Raw Phase 4 (Climax Sappers)
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.90, 2), "Stage 2 must cap at Phase 1B");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.90, 6), "Stage 6 must cap at Phase 2");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.90, 9), "Stage 9 must cap at Phase 3");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, ChunkHeatManager.resolveHordePhase(0.90, 10), "Stage 10 allows Climax Sappers");
+        // Progress 0.58 -> Raw Phase 4 (Extended Climax Sappers)
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.58, 2), "Stage 2 must cap at Phase 1B");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.58, 6), "Stage 6 must cap at Phase 2");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.58, 9), "Stage 9 must cap at Phase 3");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, ChunkHeatManager.resolveHordePhase(0.58, 10), "Stage 10 allows Climax Sappers");
 
-        // Progress 0.95 -> Raw Phase 5 (Apex Corrosion)
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.95, 2), "Stage 2 must cap at Phase 1B");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.95, 6), "Stage 6 must cap at Phase 2");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.95, 9), "Stage 9 must cap at Phase 3");
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION, ChunkHeatManager.resolveHordePhase(0.95, 10), "Stage 10 progress 0.95 resolves to Phase 5 Apex Corrosion");
+        // Progress 0.80 -> Raw Phase 5 (Extended Apex Corrosion)
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_1B_VENOM_SPIDERS, ChunkHeatManager.resolveHordePhase(0.80, 2), "Stage 2 must cap at Phase 1B");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_2_BREACHERS_SKELETONS, ChunkHeatManager.resolveHordePhase(0.80, 6), "Stage 6 must cap at Phase 2");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, ChunkHeatManager.resolveHordePhase(0.80, 9), "Stage 9 must cap at Phase 3");
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION, ChunkHeatManager.resolveHordePhase(0.80, 10), "Stage 10 progress 0.80 resolves to Phase 5 Apex Corrosion");
     }
 
     @Test
@@ -245,7 +268,7 @@ public class ChunkHeatAndBloodmoonTest {
         ChunkHeatManager.ActiveHorde horde1 = hordes.get(0);
         assertEquals(group1Pos, horde1.center);
         assertTrue(horde1.targetGroupPlayerIds.contains(uuidA));
-        assertEquals(3600, horde1.totalDurationTicks);
+        assertEquals(6000, horde1.totalDurationTicks);
 
         // Group 1 keeps shooting at (0, 64, 0) -> blocked
         assertFalse(ChunkHeatManager.canTriggerHordeForGroup(group1Pos, List.of(uuidA)),
@@ -313,7 +336,7 @@ public class ChunkHeatAndBloodmoonTest {
 
         ChunkHeatManager.ActiveHorde horde = ChunkHeatManager.getActiveHordes().get(0);
         assertEquals(center, horde.center);
-        assertEquals(4200, horde.totalDurationTicks, "2 nearby players = 3600 + 1 * 600 = 4200 ticks");
+        assertEquals(6600, horde.totalDurationTicks, "2 nearby players = 6000 + 1 * 600 = 6600 ticks");
 
         // Individual squad member p2 cannot trigger a second horde even at distant position
         assertFalse(ChunkHeatManager.canTriggerHordeForGroup(new BlockPos(500, 70, 500), List.of(p2)));
@@ -384,13 +407,13 @@ public class ChunkHeatAndBloodmoonTest {
         ChunkHeatManager.clearAllHeat();
         UUID p1 = UUID.randomUUID();
         BlockPos center = new BlockPos(0, 64, 0);
-        ChunkHeatManager.ActiveHorde horde = new ChunkHeatManager.ActiveHorde(center, Set.of(p1), 3600, 6, 10);
+        ChunkHeatManager.ActiveHorde horde = new ChunkHeatManager.ActiveHorde(center, Set.of(p1), 6000, 6, 10);
 
         assertEquals(0, horde.noTargetTicks, "noTargetTicks should initialize to 0");
         assertFalse(horde.climaxRoarPlayed, "climaxRoarPlayed should initialize to false");
 
-        // Test Phase 4 Climax resolution at 0.90 progress
-        assertEquals(ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, ChunkHeatManager.resolveHordePhase(0.90, 10));
+        // Test Phase 4 Climax resolution at 0.60 progress
+        assertEquals(ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, ChunkHeatManager.resolveHordePhase(0.60, 10));
 
         // Simulate 100 ticks without target
         horde.noTargetTicks = 100;
@@ -696,21 +719,21 @@ public class ChunkHeatAndBloodmoonTest {
         assertEquals(15.0, ChunkHeatManager.computeHordeMobMaxHealth(0.0, false), 0.001,
                 "<= 0 base health fallback must return 15.0 HP");
 
-        // 2. Increased Participation in Horde (Base 28, Squad/Stage scaling, SubWave 55%)
-        assertEquals(28, ChunkHeatManager.computeSquadScaledWaveSize(0, 1, 1, false),
-                "Base squad wave size with default 0 fallback must be 28");
-        assertEquals(55, ChunkHeatManager.computeSquadScaledWaveSize(28, 10, 1, false),
-                "Stage 10 solo wave size: 28 + (1-1)*6 + (10-1)*3 = 55");
-        assertEquals(110, ChunkHeatManager.computeSquadScaledWaveSize(28, 10, 1, true),
-                "Bloodmoon doubles Stage 10 wave size: 55 * 2 = 110");
-        assertEquals(73, ChunkHeatManager.computeSquadScaledWaveSize(28, 10, 4, false),
-                "Stage 10 4-player squad: 28 + 3*6 + 9*3 = 28 + 18 + 27 = 73");
-        assertEquals(16, ChunkHeatManager.computeSubWaveCount(28),
-                "Subwave count for wave 28: ceil(28 * 0.55) = ceil(15.4) = 16");
+        // 2. Increased Participation in Horde (Base 48, Squad/Stage scaling, SubWave 55%)
+        assertEquals(48, ChunkHeatManager.computeSquadScaledWaveSize(0, 1, 1, false),
+                "Base squad wave size with default 0 fallback must be 48");
+        assertEquals(75, ChunkHeatManager.computeSquadScaledWaveSize(48, 10, 1, false),
+                "Stage 10 solo wave size: 48 + (1-1)*6 + (10-1)*3 = 75");
+        assertEquals(150, ChunkHeatManager.computeSquadScaledWaveSize(48, 10, 1, true),
+                "Bloodmoon doubles Stage 10 wave size: 75 * 2 = 150");
+        assertEquals(93, ChunkHeatManager.computeSquadScaledWaveSize(48, 10, 4, false),
+                "Stage 10 4-player squad: 48 + 3*6 + 9*3 = 48 + 18 + 27 = 93");
+        assertEquals(27, ChunkHeatManager.computeSubWaveCount(48),
+                "Subwave count for wave 48: ceil(48 * 0.55) = ceil(26.4) = 27");
         assertEquals(12, ChunkHeatManager.computeSubWaveCount(10),
                 "Subwave count floor must be 12");
-        assertEquals(31, ChunkHeatManager.computeSubWaveCount(55),
-                "Subwave count for wave 55: ceil(55 * 0.55) = ceil(30.25) = 31");
+        assertEquals(42, ChunkHeatManager.computeSubWaveCount(75),
+                "Subwave count for wave 75: ceil(75 * 0.55) = ceil(41.25) = 42");
 
         // 3. Water-Body Spawn Prevention Constants & Helpers
         assertEquals(Integer.MIN_VALUE, ChunkHeatManager.NO_DRY_SPAWN_Y);

@@ -27,11 +27,34 @@ public class DuplicateMob {
    void Clone(Mob M) {
       ServerLevel Lvl = MobInfo.GetMobServerLevel(M);
       if (Lvl != null) {
-         BlockPos pos = M.blockPosition();
-         BlockPos Offset_Pos = this.GetOffsetPosition(pos);
-         if (this.isPositionGood(Lvl, Offset_Pos)) {
-            M.getType().spawn(Lvl, new ItemStack(Items.DIRT), null, Offset_Pos, EntitySpawnReason.MOB_SUMMONED, true, false);
+         var server = Lvl.getServer();
+         if (server == null) {
+            return;
          }
+         if (!server.isSameThread()) {
+            // Never query ServerLevel.getBlockState() or spawn from a worldgen/worker thread (deadlocks with C2ME + Lithium).
+            server.execute(() -> {
+               if (M.isAlive() && !M.isRemoved() && Lvl.isLoaded(M.blockPosition())) {
+                  this.spawnCloneOnServerThread(Lvl, M);
+               }
+            });
+            return;
+         }
+         this.spawnCloneOnServerThread(Lvl, M);
+      }
+   }
+
+   private void spawnCloneOnServerThread(ServerLevel Lvl, Mob M) {
+      if (Lvl == null || M == null || !M.isAlive() || M.isRemoved()) {
+         return;
+      }
+      BlockPos pos = M.blockPosition();
+      if (!Lvl.isLoaded(pos)) {
+         return;
+      }
+      BlockPos Offset_Pos = this.GetOffsetPosition(pos);
+      if (this.isPositionGood(Lvl, Offset_Pos)) {
+         M.getType().spawn(Lvl, new ItemStack(Items.DIRT), null, Offset_Pos, EntitySpawnReason.MOB_SUMMONED, true, false);
       }
    }
 
@@ -42,8 +65,19 @@ public class DuplicateMob {
    }
 
    boolean isPositionGood(ServerLevel Lvl, BlockPos Position) {
+      if (Lvl == null || Position == null) {
+         return false;
+      }
+      var server = Lvl.getServer();
+      if (server == null || !server.isSameThread()) {
+         return false;
+      }
+      BlockPos abovePos = PositionInfo.OffsetPos(Position, 0.0, 1.0, 0.0);
+      if (!Lvl.isLoaded(Position) || !Lvl.isLoaded(abovePos)) {
+         return false;
+      }
       boolean isBottomOK = Lvl.getBlockState(Position).isAir();
-      boolean isTopOK = Lvl.getBlockState(PositionInfo.OffsetPos(Position, 0.0, 1.0, 0.0)).isAir();
+      boolean isTopOK = Lvl.getBlockState(abovePos).isAir();
       return isBottomOK && isTopOK;
    }
 }

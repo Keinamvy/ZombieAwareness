@@ -117,6 +117,16 @@ public abstract class MixinLivingEntity {
         }
     }
 
+    @Inject(method = "hurtServer", at = @At("RETURN"))
+    public void za$onHurtServerReturnSpawnClones(ServerLevel level, DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
+        if (cir.getReturnValueZ() && !za$processingApexBypass) {
+            LivingEntity victim = (LivingEntity)(Object)this;
+            if (victim instanceof Mob mob && mob.isAlive() && !mob.isRemoved()) {
+                ZAUtil.trySpawnDamageClones(level, mob, source, amount);
+            }
+        }
+    }
+
     @Inject(method = "die", at = @At("HEAD"))
     public void za$onEntityDie(DamageSource source, CallbackInfo ci) {
         LivingEntity self = (LivingEntity)(Object)this;

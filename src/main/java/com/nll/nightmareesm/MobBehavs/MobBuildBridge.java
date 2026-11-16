@@ -16,19 +16,25 @@ public class MobBuildBridge {
    public boolean isDoing;
 
    public MobBuildBridge(Mob M) {
+      if (M == null) {
+         return;
+      }
       Entity Tgt = M.getTarget();
-      if (Tgt != null && Tgt instanceof ServerPlayer Server_Player && !Server_Player.isCreative() && !Server_Player.isSpectator() && this.isMonsterAtTargetLvl(M, Tgt)) {
+      if (Tgt instanceof ServerPlayer Server_Player && MobInfo.isSameDimension(M, Server_Player) && !Server_Player.isCreative() && !Server_Player.isSpectator() && this.isMonsterAtTargetLvl(M, Tgt)) {
          double horizDist = Math.hypot(M.getX() - Tgt.getX(), M.getZ() - Tgt.getZ());
          if (horizDist >= 2.0 && horizDist <= 24.0) {
             BlockPos M_Pos = M.blockPosition();
             M.lookAt(Tgt, 30.0F, 30.0F);
             BlockPos Fwd_Block_Pos = M_Pos.relative(M.getDirection());
             Level Curr_Level = MobInfo.GetMobLevel(M);
-            if (Curr_Level != null) {
+            if (MobInfo.isServerPosLoaded(Curr_Level, Fwd_Block_Pos)) {
                BlockState Current_State = Curr_Level.getBlockState(Fwd_Block_Pos);
                if (Current_State.isAir() || Current_State.canBeReplaced()) {
                   BlockPos Block_Below_Pos = Fwd_Block_Pos.below();
                   BlockPos Block_Below_Pos2 = Block_Below_Pos.below();
+                  if (!MobInfo.isServerPosLoaded(Curr_Level, Block_Below_Pos) || !MobInfo.isServerPosLoaded(Curr_Level, Block_Below_Pos2)) {
+                     return;
+                  }
                   BlockState Block_Below_State = Curr_Level.getBlockState(Block_Below_Pos);
                   BlockState Block_Below_State2 = Curr_Level.getBlockState(Block_Below_Pos2);
                   if (Block_Below_State.isAir() && Block_Below_State2.isAir()) {

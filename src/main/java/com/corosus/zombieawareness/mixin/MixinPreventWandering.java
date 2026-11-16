@@ -21,7 +21,10 @@ public abstract class MixinPreventWandering {
             at = @At(value = "HEAD"), cancellable = true)
     public void canUse(CallbackInfoReturnable<Boolean> cir) {
         ZombieAwareness.unitTest("13");
-        long lastActionTime = ZombieAwareness.instance().getPersistentData(mob).getLongOr(ZAUtil.ZA_LAST_ACTION, 0L);
+        if (mob == null || mob.level() == null || mob.level().isClientSide()) {
+            return;
+        }
+        long lastActionTime = ZombieAwareness.getPersistentDataSafe(mob).getLongOr(ZAUtil.ZA_LAST_ACTION, 0L);
         if (lastActionTime > 0 && mob.level().getGameTime() - ZAConfigGeneral.tickCooldownBetweenPathfinds < lastActionTime) {
             cir.setReturnValue(false);
         }

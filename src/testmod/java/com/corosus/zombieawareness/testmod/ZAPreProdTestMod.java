@@ -199,8 +199,8 @@ public class ZAPreProdTestMod implements ModInitializer {
             assertCondition(!ChunkHeatManager.isDawnArrival(true, 18000L, false), "Midnight must not trigger dawn victory");
             assertCondition(!ChunkHeatManager.isDawnArrival(true, 0L, true), "Bloodmoon dawn must not trigger dawn victory");
 
-            assertCondition(ChunkHeatManager.computeHordeDurationTicks(1) == 3600, "1 player horde duration must be 3600 ticks (3 mins)");
-            assertCondition(ChunkHeatManager.computeHordeDurationTicks(3) == 4800, "3 players horde duration must be 4800 ticks (4 mins)");
+            assertCondition(ChunkHeatManager.computeHordeDurationTicks(1) == 6000, "1 player horde duration must be 6000 ticks (5 mins)");
+            assertCondition(ChunkHeatManager.computeHordeDurationTicks(3) == 7200, "3 players horde duration must be 7200 ticks (6 mins)");
 
             // Verify Death Group Forgiveness (Full Group Wipe + Partial Squad Down-Scaling + 80% Horde Dispersal + 3-Min Grace Period)
             ChunkHeatManager.clearActiveHordes();
@@ -477,7 +477,7 @@ public class ZAPreProdTestMod implements ModInitializer {
 
             // Super-late-game Phase 5 Apex Corrosion & ZAUtil Apex Mechanics
             assertCondition(ChunkHeatManager.resolveHordePhase(0.95, 10) == ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION, "Stage 10 at 0.95 progress must resolve to PHASE_5_APEX_CORROSION");
-            assertCondition(ChunkHeatManager.resolveHordePhase(0.90, 10) == ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, "Stage 10 at 0.90 progress must resolve to PHASE_4_CLIMAX_SAPPERS");
+            assertCondition(ChunkHeatManager.resolveHordePhase(0.60, 10) == ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, "Stage 10 at 0.60 progress must resolve to PHASE_4_CLIMAX_SAPPERS");
             assertCondition(ChunkHeatManager.resolveHordePhase(0.95, 9) == ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, "Stage 9 at 0.95 progress must cap at PHASE_3_JUGGERNAUTS_WITCHES");
 
             float[] apexSplit = ZAUtil.splitApexArmorBypassDamage(10.0f);

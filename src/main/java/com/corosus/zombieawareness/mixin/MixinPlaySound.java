@@ -19,6 +19,10 @@ public abstract class MixinPlaySound {
             at = @At(value = "INVOKE", target = "Lnet/minecraft/server/players/PlayerList;broadcast(Lnet/minecraft/world/entity/player/Player;DDDDLnet/minecraft/resources/ResourceKey;Lnet/minecraft/network/protocol/Packet;)V"))
     public void playSeededSound(Entity pExcept, double pX, double pY, double pZ, Holder<SoundEvent> sound, SoundSource soundSource, float volume, float pitch, long seed, CallbackInfo ci) {
         ZombieAwareness.unitTest("12");
-        ZAUtil.hookSoundEvent(sound.value(), ((ServerLevel)(Object)this), pX, pY, pZ, volume, pitch);
+        ServerLevel self = (ServerLevel)(Object)this;
+        if (sound == null || self.getServer() == null || !self.getServer().isSameThread()) {
+            return;
+        }
+        ZAUtil.hookSoundEvent(sound.value(), self, pX, pY, pZ, volume, pitch);
     }
 }

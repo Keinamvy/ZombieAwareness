@@ -9,7 +9,15 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 
 public class MobScreamerAlert {
-   private static long lastGlobalScreamTick = -999999L;
+   private static final Object SCREAM_LOCK = new Object();
+   private static volatile long lastGlobalScreamTick = -999999L;
+
+   public static boolean shouldThrottleScream(long gameTime, long lastScreamTick) {
+      if (lastScreamTick < 0L || gameTime < lastScreamTick) {
+         return false;
+      }
+      return (gameTime - lastScreamTick) < 100L;
+   }
 
    public static boolean checkAndTrigger(Zombie zombie) {
       if (zombie == null) {
@@ -21,11 +29,13 @@ public class MobScreamerAlert {
          && zombie.level() instanceof ServerLevel serverLevel) {
 
          long gameTime = serverLevel.getGameTime();
-         if (gameTime - lastGlobalScreamTick < 100L) {
-            return false;
+         synchronized (SCREAM_LOCK) {
+            if (shouldThrottleScream(gameTime, lastGlobalScreamTick)) {
+               return false;
+            }
+            lastGlobalScreamTick = gameTime;
          }
 
-         lastGlobalScreamTick = gameTime;
          zombie.addTag("za_screamer_triggered");
          serverLevel.playSound(null, zombie.getX(), zombie.getY(), zombie.getZ(), SoundEvents.WARDEN_ROAR, SoundSource.HOSTILE, 2.5F, 1.0F);
          serverLevel.playSound(null, zombie.getX(), zombie.getY(), zombie.getZ(), SoundEvents.GHAST_SCREAM, SoundSource.HOSTILE, 2.0F, 1.0F);
@@ -41,6 +51,16 @@ public class MobScreamerAlert {
    }
 
    public static void resetLastGlobalScreamTick() {
-      lastGlobalScreamTick = -999999L;
+      synchronized (SCREAM_LOCK) {
+         lastGlobalScreamTick = -999999L;
+      }
+   }
+
+   public static long getLastGlobalScreamTick() {
+      return lastGlobalScreamTick;
+   }
+
+   public static void setLastGlobalScreamTickForTest(long tick) {
+      lastGlobalScreamTick = tick;
    }
 }

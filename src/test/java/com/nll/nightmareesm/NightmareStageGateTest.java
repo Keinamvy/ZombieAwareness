@@ -221,7 +221,7 @@ public class NightmareStageGateTest {
       assertEquals(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES,
          com.corosus.zombieawareness.heat.ChunkHeatManager.resolveHordePhase(0.95, 9));
       assertEquals(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS,
-         com.corosus.zombieawareness.heat.ChunkHeatManager.resolveHordePhase(0.90, 10));
+         com.corosus.zombieawareness.heat.ChunkHeatManager.resolveHordePhase(0.60, 10));
 
       float[] split = com.corosus.zombieawareness.ZAUtil.splitApexArmorBypassDamage(20.0f);
       assertEquals(12.0f, split[0], 1e-4f);

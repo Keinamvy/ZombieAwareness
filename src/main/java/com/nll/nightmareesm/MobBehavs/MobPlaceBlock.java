@@ -16,7 +16,7 @@ public class MobPlaceBlock {
    public MobPlaceBlock(Entity Entity_Class, Block Block_Type, BlockPos Position) {
       if (Entity_Class instanceof Mob Mob_Entity && Position != null && Block_Type != null) {
          Level Lvl = MobInfo.GetMobLevel(Mob_Entity);
-         if (Lvl == null || Lvl.isClientSide()) {
+         if (!MobInfo.isServerPosLoaded(Lvl, Position)) {
             return;
          }
          BlockState existing = Lvl.getBlockState(Position);

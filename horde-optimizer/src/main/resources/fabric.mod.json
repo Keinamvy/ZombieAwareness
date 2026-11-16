@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "za_horde_optimizer",
+  "version": "${version}",
+  "name": "ZA Horde Optimizer",
+  "description": "Disables horde mob collision and applies spatial cluster pathfinding and AI optimization for Zombie Awareness.",
+  "authors": [
+    "Corosus"
+  ],
+  "license": "All Rights Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.corosus.zahordeoptimizer.HordeOptimizerMod"
+    ]
+  },
+  "mixins": [
+    "za_horde_optimizer.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "fabric-api": "*",
+    "minecraft": "~26.3-",
+    "zombieawareness": "*",
+    "java": ">=25"
+  }
+}
