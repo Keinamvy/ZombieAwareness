@@ -1312,6 +1312,7 @@ public class ChunkHeatManager {
         boolean isTanker = zombie.entityTags().contains(HordeSpecialUnitHelper.TANKER_TAG);
         boolean isKnight = zombie.entityTags().contains(HordeSpecialUnitHelper.KNIGHT_TAG);
         boolean isEngineer = zombie.entityTags().contains(HordeSpecialUnitHelper.ENGINEER_TAG);
+        boolean isScreamer = zombie.entityTags().contains(HordeSpecialUnitHelper.SCREAMER_TAG);
         boolean isRampage = zombie.entityTags().contains(RAMPAGE_TAG);
 
         Drowned drowned = zombie.convertTo(
@@ -1326,6 +1327,7 @@ public class ChunkHeatManager {
                 if (isTanker) d.addTag(HordeSpecialUnitHelper.TANKER_TAG);
                 if (isKnight) d.addTag(HordeSpecialUnitHelper.KNIGHT_TAG);
                 if (isEngineer) d.addTag(HordeSpecialUnitHelper.ENGINEER_TAG);
+                if (isScreamer) d.addTag(HordeSpecialUnitHelper.SCREAMER_TAG);
                 applyHordeMobHealthScaling(d);
                 if (isRampage) applyRampageBuffs(d);
                 HordeSpecialUnitHelper.applySpecialMobIndicator(d);
@@ -1472,6 +1474,9 @@ public class ChunkHeatManager {
         for (Mob mob : nearbyHostiles) {
             if (!mob.entityTags().contains("za_horde_mob")) {
                 mob.addTag("za_horde_mob");
+            }
+            if (mob.entityTags().contains(HordeSpecialUnitHelper.SCREAMER_TAG)) {
+                HordeSpecialUnitHelper.applySpecialMobIndicator(mob);
             }
             LivingEntity currentTarget = mob.getTarget();
             if (currentTarget != null && ZAUtil.isVillagerEntity(currentTarget)) {

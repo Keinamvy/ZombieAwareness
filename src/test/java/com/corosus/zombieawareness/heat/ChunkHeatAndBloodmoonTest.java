@@ -8,7 +8,16 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 
+import java.io.InputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -566,15 +575,40 @@ public class ChunkHeatAndBloodmoonTest {
     }
 
     @Test
-    public void apexCorrosiveMechanicsAndArmorDurabilityShred() {
-        // 1. 40% Armor Bypass Damage Split
-        float[] split = ZAUtil.splitApexArmorBypassDamage(10.0f);
-        assertEquals(6.0f, split[0], 1e-4f, "split[0] must be 60% normal armor-mitigated damage (6.0f)");
-        assertEquals(4.0f, split[1], 1e-4f, "split[1] must be 40% direct armor-bypassing damage (4.0f)");
+    public void apexCorrosiveMechanicsAndArmorDurabilityShred() throws Exception {
+        // 1. Apex Corrosive must NOT deal true damage or armor-bypass damage
+        for (Field f : ZAUtil.class.getDeclaredFields()) {
+            assertFalse(f.getName().contains("BYPASS") && f.getName().contains("APEX"),
+                    "Apex armor bypass ratio constant must not exist: " + f.getName());
+        }
+        for (Method m : ZAUtil.class.getDeclaredMethods()) {
+            assertFalse(m.getName().contains("ApexArmorBypass") || m.getName().contains("ApexTrueDamage"),
+                    "Apex true/bypass damage helper must not exist: " + m.getName());
+        }
 
-        float[] split20 = ZAUtil.splitApexArmorBypassDamage(20.0f);
-        assertEquals(12.0f, split20[0], 1e-4f);
-        assertEquals(8.0f, split20[1], 1e-4f);
+        ClassLoader cl = ChunkHeatAndBloodmoonTest.class.getClassLoader();
+        try (InputStream is = cl.getResourceAsStream("com/corosus/zombieawareness/mixin/MixinLivingEntity.class")) {
+            assertNotNull(is, "MixinLivingEntity.class must be present on classpath");
+            ClassNode mixinNode = new ClassNode();
+            new ClassReader(is).accept(mixinNode, 0);
+            assertTrue(mixinNode.fields.stream().noneMatch(f -> "za$processingApexBypass".equals(f.name)),
+                    "MixinLivingEntity must not retain za$processingApexBypass state");
+            for (MethodNode mn : mixinNode.methods) {
+                for (AbstractInsnNode insn : mn.instructions) {
+                    if (insn instanceof MethodInsnNode min) {
+                        assertFalse("splitApexArmorBypassDamage".equals(min.name),
+                                "MixinLivingEntity must not invoke splitApexArmorBypassDamage");
+                        if ("za$blockHostileFriendlyFire".equals(mn.name)) {
+                            assertFalse("setHealth".equals(min.name) || "setAbsorptionAmount".equals(min.name) || "hurtServer".equals(min.name),
+                                    "za$blockHostileFriendlyFire must not directly reduce health/absorption or re-dispatch hurtServer: " + min.name);
+                        }
+                    } else if (insn instanceof FieldInsnNode fin) {
+                        assertFalse("APEX_ARMOR_BYPASS_RATIO".equals(fin.name),
+                                "MixinLivingEntity must not reference APEX_ARMOR_BYPASS_RATIO");
+                    }
+                }
+            }
+        }
 
         // 2. Necrotic Trauma: Reduced Regeneration Efficiency (50%) & 160-Tick Duration
         UUID playerUuid = UUID.randomUUID();
@@ -594,10 +628,11 @@ public class ChunkHeatAndBloodmoonTest {
         assertEquals(-5.0f, ZAUtil.computeModifiedHealAmount(playerUuid, 100L, -5.0f), 1e-4f, "Non-positive heal amounts unaffected");
         assertEquals(10.0f, ZAUtil.computeModifiedHealAmount(null, 100L, 10.0f), 1e-4f, "Null player UUID handled safely");
 
-        // 3. Direct Armor Durability Shredding
+        // 3. Direct Armor Durability Shredding (preserved non-true-damage behavior)
         assertEquals(20, ZAUtil.computeArmorDurabilityShred(400), "5% of 400 is 20 (>= 12 min)");
         assertEquals(12, ZAUtil.computeArmorDurabilityShred(100), "5% of 100 is 5, must clamp to minimum 12");
         assertEquals(12, ZAUtil.computeArmorDurabilityShred(0), "0 max durability must clamp to minimum 12");
+        assertEquals(0, ZAUtil.shredPlayerArmorDurability(null, null), "Null player must safely shred 0 durability");
     }
 
     @Test

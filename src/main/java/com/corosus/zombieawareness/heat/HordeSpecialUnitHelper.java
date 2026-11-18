@@ -68,6 +68,7 @@ public final class HordeSpecialUnitHelper {
     public static final String JUGGERNAUT_TAG = "za_juggernaut";
     public static final String CRAWLER_TAG = "za_crawler";
     public static final String SAPPER_TAG = "za_tnt_sapper";
+    public static final String SCREAMER_TAG = "za_screamer";
     public static final String THROWN_PROJECTILE_TAG = "za_thrown_projectile";
     public static final String THROWN_LANDED_TAG = "za_thrown_landed";
     public static final String SAPPER_FUSE_TAG = "za_sapper_fuse";
@@ -99,6 +100,7 @@ public final class HordeSpecialUnitHelper {
     public static final double DEFAULT_JUGGERNAUT_THROW_MAX_RANGE = 28.0D;
     public static final double JUGGERNAUT_AMMO_GRAB_RADIUS = 5.0D;
     public static final int DEFAULT_THROWN_SAPPER_FUSE_TICKS = 50;
+    public static final int SCREAMER_GLOW_DURATION_TICKS = 7200;
 
     public static final String TANKER_LABEL = "§b§l[TANKER]";
     public static final String KNIGHT_LABEL = "§6§l[KNIGHT]";
@@ -320,6 +322,19 @@ public final class HordeSpecialUnitHelper {
     }
 
     /**
+     * Returns true only when the entity's tag set represents a [SCREAMER] unit actively belonging to a horde.
+     * Non-horde Screamers and all other horde mobs, elites, Apex variants, or special units must not glow.
+     */
+    public static boolean shouldHordeScreamerGlow(Collection<String> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return false;
+        }
+        return tags.contains("za_horde_mob")
+                && tags.contains(SCREAMER_TAG)
+                && SCREAMER_LABEL.equals(resolveSpecialIndicatorLabel(tags));
+    }
+
+    /**
      * Applies visible colored nameplates, distinct scale, and unmistakable gear indicators for special ZA mobs.
      */
     public static void applySpecialMobIndicator(Mob mob) {
@@ -347,27 +362,6 @@ public final class HordeSpecialUnitHelper {
             if (mob.getItemBySlot(EquipmentSlot.HEAD).isEmpty()) {
                 mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.NETHERITE_HELMET));
             }
-        } else if (tags.contains("za_tnt_sapper")) {
-            if (!mob.getMainHandItem().is(Items.TNT)) {
-                mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.TNT));
-            }
-            if (mob.getItemBySlot(EquipmentSlot.HEAD).isEmpty()) {
-                mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.LEATHER_HELMET));
-            }
-        } else if (tags.contains("za_screamer")) {
-            if (mob.getItemBySlot(EquipmentSlot.HEAD).isEmpty()) {
-                mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.GOLDEN_HELMET));
-            }
-            if (!mob.hasEffect(MobEffects.GLOWING)) {
-                mob.addEffect(new MobEffectInstance(MobEffects.GLOWING, 7200, 0, false, false));
-            }
-        } else if (tags.contains("za_juggernaut")) {
-            if (mob.getItemBySlot(EquipmentSlot.CHEST).isEmpty()) {
-                mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
-                mob.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
-                mob.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
-                mob.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
-            }
         } else if (tags.contains(KNIGHT_TAG)) {
             if (mob.getMainHandItem().isEmpty()) {
                 mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_SPEAR));
@@ -385,6 +379,28 @@ public final class HordeSpecialUnitHelper {
             if (mob.getItemBySlot(EquipmentSlot.CHEST).isEmpty()) {
                 mob.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.CHAINMAIL_CHESTPLATE));
             }
+        } else if (tags.contains(JUGGERNAUT_TAG)) {
+            if (mob.getItemBySlot(EquipmentSlot.CHEST).isEmpty()) {
+                mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
+                mob.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
+                mob.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
+                mob.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
+            }
+        } else if (tags.contains(SAPPER_TAG)) {
+            if (!mob.getMainHandItem().is(Items.TNT)) {
+                mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.TNT));
+            }
+            if (mob.getItemBySlot(EquipmentSlot.HEAD).isEmpty()) {
+                mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.LEATHER_HELMET));
+            }
+        } else if (tags.contains(SCREAMER_TAG)) {
+            if (mob.getItemBySlot(EquipmentSlot.HEAD).isEmpty()) {
+                mob.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.GOLDEN_HELMET));
+            }
+        }
+
+        if (shouldHordeScreamerGlow(tags) && !mob.hasEffect(MobEffects.GLOWING)) {
+            mob.addEffect(new MobEffectInstance(MobEffects.GLOWING, SCREAMER_GLOW_DURATION_TICKS, 0, false, false));
         }
     }
 

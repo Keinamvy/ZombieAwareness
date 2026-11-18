@@ -218,9 +218,10 @@ public class NightmareStageGateTest {
       assertEquals(com.corosus.zombieawareness.heat.ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS,
          com.corosus.zombieawareness.heat.ChunkHeatManager.resolveHordePhase(0.60, 10));
 
-      float[] split = com.corosus.zombieawareness.ZAUtil.splitApexArmorBypassDamage(20.0f);
-      assertEquals(12.0f, split[0], 1e-4f);
-      assertEquals(8.0f, split[1], 1e-4f);
+      assertFalse(java.util.Arrays.stream(com.corosus.zombieawareness.ZAUtil.class.getDeclaredMethods())
+         .anyMatch(m -> m.getName().contains("ApexArmorBypass")));
+      assertFalse(java.util.Arrays.stream(com.corosus.zombieawareness.ZAUtil.class.getDeclaredFields())
+         .anyMatch(f -> f.getName().equals("APEX_ARMOR_BYPASS_RATIO")));
 
       java.util.UUID uuid = java.util.UUID.randomUUID();
       com.corosus.zombieawareness.ZAUtil.clearNecroticTrauma();

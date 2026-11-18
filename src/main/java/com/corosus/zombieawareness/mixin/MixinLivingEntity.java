@@ -28,9 +28,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class MixinLivingEntity {
 
     @Unique
-    private boolean za$processingApexBypass = false;
-
-    @Unique
     private long za$clutchInvulUntilTick = -1L;
 
     @Unique
@@ -64,7 +61,7 @@ public abstract class MixinLivingEntity {
             return;
         }
 
-        if (victim instanceof ServerPlayer serverPlayer && !za$processingApexBypass) {
+        if (victim instanceof ServerPlayer serverPlayer) {
             long gameTime = level.getGameTime();
             if (!ZAUtil.isClutchBypassDamage(source) && za$clutchInvulUntilTick > gameTime) {
                 cir.setReturnValue(false);
@@ -80,7 +77,7 @@ public abstract class MixinLivingEntity {
         Entity attacker = source.getEntity();
         Entity directEntity = source.getDirectEntity();
 
-        if (victim instanceof Player player && !za$processingApexBypass) {
+        if (victim instanceof Player player) {
             if ((attacker != null && attacker.entityTags().contains("za_crawler"))
                     || (directEntity != null && directEntity.entityTags().contains("za_crawler"))) {
                 player.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, 60, 1));
@@ -95,33 +92,6 @@ public abstract class MixinLivingEntity {
                 // 2. Chance (50%) to Deal Direct Armor Durability Shredding
                 if (level.getRandom().nextFloat() < 0.50f) {
                     ZAUtil.shredPlayerArmorDurability(player, level);
-                }
-
-                // 3. Chance (60%) to Bypass 40% of Player Armor
-                if (level.getRandom().nextFloat() < 0.60f && amount > 0.0f) {
-                    float[] split = ZAUtil.splitApexArmorBypassDamage(amount);
-                    za$processingApexBypass = true;
-                    try {
-                        float bypassDmg = split[1];
-                        float absorption = player.getAbsorptionAmount();
-                        if (absorption > 0.0f) {
-                            if (absorption >= bypassDmg) {
-                                player.setAbsorptionAmount(absorption - bypassDmg);
-                                bypassDmg = 0.0f;
-                            } else {
-                                player.setAbsorptionAmount(0.0f);
-                                bypassDmg -= absorption;
-                            }
-                        }
-                        if (bypassDmg > 0.0f) {
-                            player.setHealth(Math.max(0.0f, player.getHealth() - bypassDmg));
-                        }
-                        boolean result = ((LivingEntity)(Object)this).hurtServer(level, source, split[0]);
-                        cir.setReturnValue(result);
-                        return;
-                    } finally {
-                        za$processingApexBypass = false;
-                    }
                 }
             }
         }
@@ -150,7 +120,7 @@ public abstract class MixinLivingEntity {
 
     @Inject(method = "hurtServer", at = @At("RETURN"))
     public void za$onHurtServerReturnSpawnClones(ServerLevel level, DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
-        if (cir.getReturnValueZ() && !za$processingApexBypass) {
+        if (cir.getReturnValueZ()) {
             LivingEntity victim = (LivingEntity)(Object)this;
             if (victim instanceof Mob mob && mob.isAlive() && !mob.isRemoved()) {
                 ZAUtil.trySpawnDamageClones(level, mob, source, amount);

@@ -17,6 +17,15 @@ def runGitTrimmed = { List<String> gitArgs ->
 	return null
 }
 
+ext.resolveNonBlankProperty = { String propName, String fallback ->
+	String explicit = gradle.startParameter.projectProperties.get(propName)?.toString()?.trim()
+	if (explicit != null && !explicit.isEmpty()) {
+		return [value: explicit, explicit: true]
+	}
+	String configured = findProperty(propName)?.toString()?.trim()
+	return [value: (configured != null && !configured.isEmpty()) ? configured : fallback, explicit: false]
+}
+
 ext.resolveBuildVersion = { String baseVersion, boolean explicitOverride ->
 	boolean isReleaseFlag = gradle.startParameter.projectProperties.get('release')?.toString()?.equalsIgnoreCase('true') ?: false
 	if (explicitOverride || isReleaseFlag) {
@@ -26,7 +35,8 @@ ext.resolveBuildVersion = { String baseVersion, boolean explicitOverride ->
 	return shortSha != null ? "${baseVersion}-snapshot.${shortSha}" : "${baseVersion}-snapshot"
 }
 
-version = ext.resolveBuildVersion(project.mod_version.toString(), gradle.startParameter.projectProperties.containsKey('mod_version'))
+def modVerInfo = ext.resolveNonBlankProperty('mod_version', '26.3-1.14.1')
+version = ext.resolveBuildVersion(modVerInfo.value, modVerInfo.explicit)
 group = project.maven_group
 
 base {

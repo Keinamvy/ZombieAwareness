@@ -7,9 +7,21 @@ import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -358,5 +370,95 @@ public class HordeSpecialUnitsAndRapidSpawnTest {
         assertEquals(7200, ChunkHeatManager.computeSprinterSpeedDurationTicks(5));
         assertTrue(ChunkHeatManager.canGrantSprinterSpeedEffect(7, 0.99D));
         assertTrue(ChunkHeatManager.canGrantSprinterSpeedEffect(10, 0.99D));
+    }
+
+    @Test
+    void onlyScreamerInHordesGlowsAndOtherHordeOrNonHordeUnitsDoNotGlow() throws Exception {
+        // 1. Screamer in hordes must glow (base, Phase 5 Corrosive, Rampage overtime, labeled)
+        assertTrue(HordeSpecialUnitHelper.shouldHordeScreamerGlow(
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.SCREAMER_TAG)));
+        assertTrue(HordeSpecialUnitHelper.shouldHordeScreamerGlow(
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.SCREAMER_TAG, "za_apex_corrosive")));
+        assertTrue(HordeSpecialUnitHelper.shouldHordeScreamerGlow(
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.SCREAMER_TAG, ZAUtil.RAMPAGE_TAG)));
+        assertTrue(HordeSpecialUnitHelper.shouldHordeScreamerGlow(
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.SCREAMER_TAG, HordeSpecialUnitHelper.LABELED_MOB_TAG)));
+
+        // 2. Non-horde Screamers must NOT glow
+        assertFalse(HordeSpecialUnitHelper.shouldHordeScreamerGlow(
+                Set.of(HordeSpecialUnitHelper.SCREAMER_TAG)));
+        assertFalse(HordeSpecialUnitHelper.shouldHordeScreamerGlow(
+                Set.of(HordeSpecialUnitHelper.SCREAMER_TAG, HordeSpecialUnitHelper.LABELED_MOB_TAG)));
+
+        // 3. All other horde mobs, elites, Apex variants, Bloodmoon/Rampage mobs, and clones must NOT glow
+        assertFalse(HordeSpecialUnitHelper.shouldHordeScreamerGlow(null));
+        assertFalse(HordeSpecialUnitHelper.shouldHordeScreamerGlow(Collections.emptySet()));
+        List<Set<String>> nonGlowingTagSets = List.of(
+                Set.of("za_horde_mob"),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.TANKER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.KNIGHT_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.KNIGHT_MOUNT_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.ENGINEER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.JUGGERNAUT_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.CRAWLER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.SAPPER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.BLOODMOON_WARDEN_TAG, "za_apex_corrosive"),
+                Set.of("za_horde_mob", "za_apex_corrosive"),
+                Set.of("za_horde_mob", ZAUtil.RAMPAGE_TAG),
+                Set.of("za_horde_mob", "za_airdrop_passenger"),
+                Set.of("za_horde_mob", ZAUtil.DAMAGE_CLONE_TAG, ZAUtil.CLONED_MOB_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.TANKER_TAG, HordeSpecialUnitHelper.SCREAMER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.KNIGHT_TAG, HordeSpecialUnitHelper.SCREAMER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.ENGINEER_TAG, HordeSpecialUnitHelper.SCREAMER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.JUGGERNAUT_TAG, HordeSpecialUnitHelper.SCREAMER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.SAPPER_TAG, HordeSpecialUnitHelper.SCREAMER_TAG),
+                Set.of("za_horde_mob", HordeSpecialUnitHelper.BLOODMOON_WARDEN_TAG, HordeSpecialUnitHelper.SCREAMER_TAG)
+        );
+        for (Set<String> tags : nonGlowingTagSets) {
+            assertFalse(HordeSpecialUnitHelper.shouldHordeScreamerGlow(tags),
+                    "Non-Screamer or non-[SCREAMER]-labeled mob must not glow: " + tags);
+        }
+
+        // 4. Bytecode invariant: only HordeSpecialUnitHelper#applySpecialMobIndicator references MobEffects.GLOWING
+        // and it must gate glowing through shouldHordeScreamerGlow; no class calls Entity#setGlowingTag.
+        Path mainClassesRoot = Path.of(HordeSpecialUnitHelper.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        assertTrue(Files.isDirectory(mainClassesRoot), "Expected compiled main classes directory at " + mainClassesRoot);
+        Set<String> glowCallSites = new LinkedHashSet<>();
+        boolean applySpecialIndicatorCallsGate = false;
+
+        try (Stream<Path> walk = Files.walk(mainClassesRoot)) {
+            for (Path classFile : walk.filter(p -> p.toString().endsWith(".class")).toList()) {
+                try (InputStream is = Files.newInputStream(classFile)) {
+                    ClassNode cn = new ClassNode();
+                    new ClassReader(is).accept(cn, 0);
+                    for (MethodNode mn : cn.methods) {
+                        for (AbstractInsnNode insn : mn.instructions) {
+                            if (insn instanceof FieldInsnNode fin
+                                    && "net/minecraft/world/effect/MobEffects".equals(fin.owner)
+                                    && "GLOWING".equals(fin.name)) {
+                                glowCallSites.add(cn.name + "#" + mn.name);
+                            }
+                            if (insn instanceof MethodInsnNode min) {
+                                assertFalse("setGlowingTag".equals(min.name),
+                                        "Unexpected setGlowingTag call in " + cn.name + "#" + mn.name);
+                                if ("com/corosus/zombieawareness/heat/HordeSpecialUnitHelper".equals(cn.name)
+                                        && "applySpecialMobIndicator".equals(mn.name)
+                                        && "shouldHordeScreamerGlow".equals(min.name)) {
+                                    applySpecialIndicatorCallsGate = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assertEquals(
+                Set.of("com/corosus/zombieawareness/heat/HordeSpecialUnitHelper#applySpecialMobIndicator"),
+                glowCallSites,
+                "Only HordeSpecialUnitHelper#applySpecialMobIndicator may apply MobEffects.GLOWING"
+        );
+        assertTrue(applySpecialIndicatorCallsGate,
+                "HordeSpecialUnitHelper#applySpecialMobIndicator must gate glowing via shouldHordeScreamerGlow");
     }
 }

@@ -477,14 +477,10 @@ public class ZAPreProdTestMod implements ModInitializer {
             assertCondition(ChunkHeatManager.canAwakenLateGameAmbientHorde(6, 15000L, true, true, false), "Bloodmoon night must awaken ambient horde even at Stage 6");
             assertCondition(!ChunkHeatManager.canAwakenLateGameAmbientHorde(10, 6000L, false, true, false), "Daytime must not awaken ambient horde");
 
-            // Super-late-game Phase 5 Apex Corrosion & ZAUtil Apex Mechanics
+            // Super-late-game Phase 5 Apex Corrosion & ZAUtil Apex Mechanics (no true damage)
             assertCondition(ChunkHeatManager.resolveHordePhase(0.95, 10) == ChunkHeatManager.HordePhase.PHASE_5_APEX_CORROSION, "Stage 10 at 0.95 progress must resolve to PHASE_5_APEX_CORROSION");
             assertCondition(ChunkHeatManager.resolveHordePhase(0.60, 10) == ChunkHeatManager.HordePhase.PHASE_4_CLIMAX_SAPPERS, "Stage 10 at 0.60 progress must resolve to PHASE_4_CLIMAX_SAPPERS");
             assertCondition(ChunkHeatManager.resolveHordePhase(0.95, 9) == ChunkHeatManager.HordePhase.PHASE_3_JUGGERNAUTS_WITCHES, "Stage 9 at 0.95 progress must cap at PHASE_3_JUGGERNAUTS_WITCHES");
-
-            float[] apexSplit = ZAUtil.splitApexArmorBypassDamage(10.0f);
-            assertCondition(Math.abs(apexSplit[0] - 6.0f) < 0.001f, "Expected 6.0f normal damage (60%)");
-            assertCondition(Math.abs(apexSplit[1] - 4.0f) < 0.001f, "Expected 4.0f armor bypass damage (40%)");
 
             UUID testPlayerId = UUID.randomUUID();
             ZAUtil.clearNecroticTrauma();

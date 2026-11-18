@@ -3,10 +3,8 @@ plugins {
 	id 'maven-publish'
 }
 
-version = rootProject.ext.resolveBuildVersion(
-		(findProperty('addon_version') ?: '26.3-1.1.0').toString(),
-		gradle.startParameter.projectProperties.containsKey('addon_version')
-)
+def addonVerInfo = rootProject.ext.resolveNonBlankProperty('addon_version', '26.3-1.1.1')
+version = rootProject.ext.resolveBuildVersion(addonVerInfo.value, addonVerInfo.explicit)
 group = rootProject.maven_group
 
 base {

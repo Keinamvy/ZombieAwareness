@@ -81,7 +81,7 @@ Phases 4 and 5 are extended to occupy **55%** (`27% + 28%`) of the entire 5-minu
 | **2** | `20% – 32%` (`1:00 – 1:36`) | **Breachers & Cavalry** | **Pickaxe Breachers**, **Blackout Stalkers**, **Skeletons/Strays**, **`[TANKER]`**, **`[ENGINEER]`**, and mounted **`[KNIGHT]`** Zombie Horseman cavalry. |
 | **3** | `32% – 45%` (`1:36 – 2:15`) | **Juggernauts & Crawlers** | Thrower **`[JUGGERNAUT]`**, **`[CRAWLER]`**, **`[ENGINEER]`**, **`[TANKER]`**, **`[KNIGHT]`**, Spiders, Skeletons, and Witches (plus aerial Phantom drops from Stage 5+). |
 | **4** | `45% – 72%` (`2:15 – 3:36`) | **Climax Sappers (Extended 27%)** | Climax roar sounds. **`[SAPPER]`** TNT demolitionists, **`[JUGGERNAUT]`**, **`[TANKER]`**, **`[KNIGHT]`**, Creepers, Skeletons, and Phantom paratroopers. Decimation rule triggers early victory if `< 2%` remain. |
-| **5** | `72% – 100%` (`3:36 – 5:00`) | **Apex Corrosion (Extended 28%)** | Armor-piercing & healing-reducing **`[CORROSIVE]`** apex horde (Wither Skeletons, Diamond-Spear Knights, Tankers, Sappers). On **Bloodmoon nights**, **3 `[SIEGE WARDEN]` bosses** emerge to snipe TACZ-Turrets from standoff range! |
+| **5** | `72% – 100%` (`3:36 – 5:00`) | **Apex Corrosion (Extended 28%)** | Armor-corroding & healing-reducing **`[CORROSIVE]`** apex horde (Wither Skeletons, Diamond-Spear Knights, Tankers, Sappers). On **Bloodmoon nights**, **3 `[SIEGE WARDEN]` bosses** emerge to snipe TACZ-Turrets from standoff range! |
 
 *(Lower World Stages cap maximum unlocked phase: Stages 1–4 cap at Phase 1B, Stages 5–7 at Phase 2, Stages 8–9 at Phase 3, and Stage 10+ unlocks Phases 4 & 5.)*
 
@@ -111,9 +111,9 @@ All special horde units feature colored overhead nameplates (`setCustomNameVisib
 | **Siege Engineer** (`za_engineer`) | **`§3§l[ENGINEER]`** | `1.05x` scale | Spawns in Phase 2–5 front waves (~11–13%). Wields an Iron Pickaxe + Coarse Dirt offhand and Chainmail armor. Exclusively unlocks Cobblestone pillars (`MobBuildUp`) and Coarse Dirt bridges (`MobBuildBridge`) from **Stage 3+**. Placed blocks **auto-decay after `60s` (`1200` ticks)** with no drops and collapse immediately when the horde ends. |
 | **Thrower Juggernaut** (`za_juggernaut`) | **`§4§l[JUGGERNAUT]`** | `1.20x` scale, `85%` KB resistance | Heavy iron/armored shock trooper. Every **`10s` (`200` ticks)** selects targets in **`8–28` blocks**—**strictly prioritizing enabled TACZ-Turrets before survival players**—and launches nearby `[CRAWLER]`/`[SAPPER]` units (or converts a nearby horde zombie into a `[CRAWLER]`) along a ballistic arc (`za_thrown_projectile`, fall-damage immune on landing). Thrown `[SAPPER]` units arm a **`2.5s` (`50`-tick)** landing fuse! |
 | **Crawler** (`za_crawler`) | **`§e§l[CRAWLER]`** | `0.75x` scale, Speed II | Low-profile fast flanker inflicting **Slowness II** on hit; also hurled as Juggernaut siege ammo. |
-| **Screamer Scout** (`za_screamer`) | **`§d§l[SCREAMER]`** | `1.05x` scale, **Glowing** | **Golden Helmet** scout that shrieks and summons reinforcements on contact. |
+| **Screamer Scout** (`za_screamer`) | **`§d§l[SCREAMER]`** | `1.05x` scale, **Glowing (horde only)** | **Golden Helmet** scout that shrieks and summons reinforcements on contact; only Screamers in hordes glow. |
 | **TNT Sapper** (`za_tnt_sapper`) | **`§c§l[SAPPER]`** | Demolitionist | Carries **TNT** in mainhand; plants `za_sapper_tnt` against fortified walls (0 friendly-fire to hostile/horde mobs), and detonates `2.5s` after touchdown when thrown by a Juggernaut. |
-| **Apex Corrosive** (`za_apex_corrosive`) | **`§2§l[CORROSIVE]`** | Phase 5 modifier | Applies Necrotic Trauma (halved player healing for 8s), armor durability shred, and `40%` armor-bypass damage split. |
+| **Apex Corrosive** (`za_apex_corrosive`) | **`§2§l[CORROSIVE]`** | Phase 5 modifier | Applies Necrotic Trauma (halved player healing for 8s) and armor durability shred (no armor-bypassing true damage). |
 
 ---
 
@@ -200,27 +200,24 @@ Zombie Awareness and NightmareESM are hardened for heavily threaded modpacks (e.
 - **Optional Integrations**:
   - **TaCZ (Timeless and Classics Zero)**: Firearm acoustic hooks & Chunk Heat.
   - **TACZ-Turrets (`tacz_turrets`)**: `[TANKER]` turret-focus pull and Bloodmoon `[SIEGE WARDEN]` anti-turret Sonic Boom prioritization.
-  - **`za-horde-optimizer`**: Drop `za-horde-optimizer-fabric-26.3-1.1.0.jar` alongside `zombieawareness-fabric-26.3-1.14.0.jar` for collision suppression + cluster optimization.
+  - **`za-horde-optimizer`**: Drop `za-horde-optimizer-fabric-26.3-1.1.1.jar` alongside `zombieawareness-fabric-26.3-1.14.1.jar` for collision suppression + cluster optimization.
 
 ### Building, Automatic Versioning & Running Tests
 
-- **Release Builds (`-Prelease=true` on tag/dispatch)**: Produce clean SemVer artifacts (`26.3-1.14.1` and `26.3-1.1.1`), automated in [`.github/workflows/release.yml`](.github/workflows/release.yml). Tags matching `-(alpha|beta|rc|preview|snapshot)` or manual dispatches with `prerelease=true` are automatically published as GitHub Pre-releases.
-- **Preview & Snapshot Builds (default `./gradlew build` without `-Prelease=true`)**: Automatically append `-snapshot.<shortSha>` (e.g., `26.3-1.14.1-snapshot.743763e` and `26.3-1.1.1-snapshot.743763e`) to both JARs and `fabric.mod.json` manifests, with optional `-Pmod_version=...` / `-Paddon_version=...` overrides. Every push to `26.3-fabric` also updates the rolling `preview` GitHub Pre-release with the latest snapshot JARs.
+- **Release Builds (`-Prelease=true` on tag/dispatch)**: Produce clean SemVer artifacts (`26.3-1.14.1` and `26.3-1.1.1`), automated in [`.github/workflows/release.yml`](.github/workflows/release.yml). Tags (`v*`, `26.3*`) and manual `workflow_dispatch` runs (with optional `addon_version` override and `prerelease` toggle) explicitly build, verify, and attach both `zombieawareness-fabric-*.jar` and `za-horde-optimizer-fabric-*.jar`; tags matching `-(alpha|beta|rc|preview|snapshot)` or `prerelease=true` publish as GitHub Pre-releases.
+- **Preview & Snapshot Builds (default `./gradlew build` without `-Prelease=true`)**: Automatically append `-snapshot.<shortSha>` (e.g., `26.3-1.14.1-snapshot.743763e` and `26.3-1.1.1-snapshot.743763e`) to both JARs and `fabric.mod.json` manifests, with optional `-Pmod_version=...` / `-Paddon_version=...` overrides. Every push to `26.3-fabric` also updates the rolling `preview` GitHub Pre-release with both snapshot JARs.
 
 ```bash
 # Ensure Java 25 is active
 java -version
 
 # Clean release build for both ZombieAwareness and za-horde-optimizer + run all JUnit 5 tests
-./gradlew clean build -Prelease=true
+./gradlew clean build :horde-optimizer:build compileTestmodJava -Prelease=true
 
 # Snapshot dev build (appends -snapshot.<shortSha> to both JARs)
-./gradlew build
-
-# Also verify the Fabric testmod sources compile cleanly
-./gradlew compileTestmodJava
+./gradlew clean build :horde-optimizer:build compileTestmodJava
 ```
 
 Built release artifacts are output to:
-- Main mod: `build/libs/zombieawareness-fabric-26.3-1.14.0.jar`
-- Horde Optimizer addon: `horde-optimizer/build/libs/za-horde-optimizer-fabric-26.3-1.1.0.jar`
+- Main mod: `build/libs/zombieawareness-fabric-26.3-1.14.1.jar`
+- Horde Optimizer addon: `horde-optimizer/build/libs/za-horde-optimizer-fabric-26.3-1.1.1.jar`

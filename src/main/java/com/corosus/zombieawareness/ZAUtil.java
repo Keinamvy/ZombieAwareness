@@ -92,7 +92,6 @@ public class ZAUtil {
 	public static String SPEED_BOOST_TAG = "za_speedbosted";
 	public static String ZA_LAST_ACTION = "za_last_action";
 
-    public static final float APEX_ARMOR_BYPASS_RATIO = 0.40f; // Bypasses 40% of player armor
     public static final float NECROTIC_REGEN_EFFICIENCY = 0.50f; // Reduces healing/regeneration efficiency by 50%
     public static final long NECROTIC_TRAUMA_DURATION_TICKS = 160L; // 8 seconds
     public static final float HORDE_MOB_LOOT_DROP_CHANCE = 0.20f; // Only 20% of horde mobs drop loot (80% drop reduction)
@@ -1227,10 +1226,6 @@ public class ZAUtil {
 			return false;
 		}
 	}
-
-    public static float[] splitApexArmorBypassDamage(float totalDamage) {
-        return new float[]{ totalDamage * (1.0f - APEX_ARMOR_BYPASS_RATIO), totalDamage * APEX_ARMOR_BYPASS_RATIO };
-    }
 
     public static void applyNecroticTrauma(UUID playerUuid, long currentTick) {
         if (playerUuid != null) {

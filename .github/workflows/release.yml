@@ -17,6 +17,11 @@ on:
         required: false
         default: 'v26.3-1.14.1'
         type: string
+      addon_version:
+        description: 'Optional za-horde-optimizer version override (defaults to gradle.properties addon_version)'
+        required: false
+        default: ''
+        type: string
       prerelease:
         description: 'Mark GitHub Release as a pre-release (preview)'
         required: false
@@ -51,11 +56,16 @@ jobs:
 
       - name: Resolve release metadata
         id: release_meta
+        env:
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+          INPUT_ADDON_VERSION: ${{ inputs.addon_version }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           TAG_NAME=""
           IS_PRERELEASE="false"
           IS_PREVIEW_BRANCH="false"
           GRADLE_VERSION_FLAGS=""
+          ADDON_VER="$(printf '%s' "${INPUT_ADDON_VERSION}" | xargs)"
 
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF_NAME}"
@@ -65,12 +75,15 @@ jobs:
               IS_PRERELEASE="true"
             fi
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TAG_NAME="${{ inputs.tag_name || 'v26.3-1.14.1' }}"
+            TAG_NAME="${INPUT_TAG_NAME:-v26.3-1.14.1}"
             if [[ "${TAG_NAME}" != "preview" ]]; then
               TAG_VER="${TAG_NAME#v}"
               GRADLE_VERSION_FLAGS="-Prelease=true -Pmod_version=${TAG_VER}"
             fi
-            if [[ "${{ inputs.prerelease }}" == "true" ]] || [[ "${TAG_NAME}" == "preview" ]] || [[ "${TAG_NAME}" =~ -(alpha|beta|rc|preview|snapshot) ]]; then
+            if [[ -n "${ADDON_VER}" ]]; then
+              GRADLE_VERSION_FLAGS="${GRADLE_VERSION_FLAGS} -Paddon_version=${ADDON_VER}"
+            fi
+            if [[ "${INPUT_PRERELEASE}" == "true" ]] || [[ "${TAG_NAME}" == "preview" ]] || [[ "${TAG_NAME}" =~ -(alpha|beta|rc|preview|snapshot) ]]; then
               IS_PRERELEASE="true"
             fi
           elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/26.3-fabric" ]]; then
@@ -93,7 +106,39 @@ jobs:
       - name: Build, run JUnit 5 tests & compile testmod
         run: |
           chmod +x gradlew
-          ./gradlew clean build compileTestmodJava ${{ steps.release_meta.outputs.gradle_version_flags }} --no-daemon --console=plain -Dorg.gradle.java.home="$JAVA_HOME"
+          ./gradlew clean build :horde-optimizer:build compileTestmodJava ${{ steps.release_meta.outputs.gradle_version_flags }} --no-daemon --console=plain -Dorg.gradle.java.home="$JAVA_HOME"
+
+      - name: Verify built release JARs for ZombieAwareness and za-horde-optimizer
+        run: |
+          shopt -s nullglob
+          main_jars=()
+          for f in build/libs/zombieawareness-fabric-*.jar; do
+            case "$f" in
+              *-sources.jar|*-dev.jar) continue ;;
+            esac
+            main_jars+=("$f")
+          done
+          addon_jars=()
+          for f in horde-optimizer/build/libs/za-horde-optimizer-fabric-*.jar; do
+            case "$f" in
+              *-sources.jar|*-dev.jar) continue ;;
+            esac
+            addon_jars+=("$f")
+          done
+
+          if [[ ${#main_jars[@]} -eq 0 ]]; then
+            echo "ERROR: Missing ZombieAwareness JAR matching build/libs/zombieawareness-fabric-*.jar" >&2
+            ls -la build/libs/ || true
+            exit 1
+          fi
+          if [[ ${#addon_jars[@]} -eq 0 ]]; then
+            echo "ERROR: Missing za-horde-optimizer JAR matching horde-optimizer/build/libs/za-horde-optimizer-fabric-*.jar" >&2
+            ls -la horde-optimizer/build/libs/ || true
+            exit 1
+          fi
+
+          echo "Verified release JARs:"
+          ls -lh "${main_jars[@]}" "${addon_jars[@]}"
 
       - name: Upload built JAR artifacts
         uses: actions/upload-artifact@v4
@@ -115,9 +160,9 @@ jobs:
           git push -f origin refs/tags/preview
 
           if gh release view preview -R "${{ github.repository }}" >/dev/null 2>&1; then
-            for asset in $(gh release view preview -R "${{ github.repository }}" --json assets --jq '.assets[].name'); do
-              gh release delete-asset preview "$asset" -R "${{ github.repository }}" -y || true
-            done
+            while IFS= read -r asset; do
+              [[ -n "$asset" ]] && gh release delete-asset preview "$asset" -R "${{ github.repository }}" -y || true
+            done < <(gh release view preview -R "${{ github.repository }}" --json assets --jq '.assets[].name')
           fi
 
       - name: Publish Preview Release
@@ -128,7 +173,7 @@ jobs:
           name: ZombieAwareness Preview (26.3-fabric)
           body: |
             Rolling snapshot preview build from `26.3-fabric` at commit `${{ github.sha }}`.
-            These JARs are built automatically without `-Prelease=true` and include the `-snapshot.<shortHash>` suffix.
+            Includes both **`zombieawareness-fabric`** and companion addon **`za-horde-optimizer-fabric`** built automatically without `-Prelease=true` (carrying the `-snapshot.<shortHash>` suffix).
           prerelease: true
           make_latest: false
           fail_on_unmatched_files: true
@@ -142,6 +187,8 @@ jobs:
         with:
           tag_name: ${{ steps.release_meta.outputs.tag_name }}
           name: ZombieAwareness ${{ steps.release_meta.outputs.tag_name }}
+          body: |
+            Includes both **`zombieawareness-fabric`** (main mod) and **`za-horde-optimizer-fabric`** (companion horde optimization addon).
           prerelease: ${{ steps.release_meta.outputs.prerelease }}
           make_latest: ${{ steps.release_meta.outputs.make_latest }}
           generate_release_notes: true
