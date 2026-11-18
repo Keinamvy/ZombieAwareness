@@ -204,8 +204,8 @@ Zombie Awareness and NightmareESM are hardened for heavily threaded modpacks (e.
 
 ### Building, Automatic Versioning & Running Tests
 
-- **Release Builds (`-Prelease=true` on tag/dispatch)**: Produce clean SemVer artifacts (`26.3-1.14.0` and `26.3-1.1.0`), automated in [`.github/workflows/release.yml`](.github/workflows/release.yml).
-- **Snapshot Builds (default `./gradlew build` without `-Prelease=true`)**: Automatically append `-snapshot.<shortSha>` (e.g., `26.3-1.14.0-snapshot.ac03dee` and `26.3-1.1.0-snapshot.ac03dee`) to both JARs and `fabric.mod.json` manifests, with optional `-Pmod_version=...` / `-Paddon_version=...` overrides.
+- **Release Builds (`-Prelease=true` on tag/dispatch)**: Produce clean SemVer artifacts (`26.3-1.14.1` and `26.3-1.1.1`), automated in [`.github/workflows/release.yml`](.github/workflows/release.yml). Tags matching `-(alpha|beta|rc|preview|snapshot)` or manual dispatches with `prerelease=true` are automatically published as GitHub Pre-releases.
+- **Preview & Snapshot Builds (default `./gradlew build` without `-Prelease=true`)**: Automatically append `-snapshot.<shortSha>` (e.g., `26.3-1.14.1-snapshot.743763e` and `26.3-1.1.1-snapshot.743763e`) to both JARs and `fabric.mod.json` manifests, with optional `-Pmod_version=...` / `-Paddon_version=...` overrides. Every push to `26.3-fabric` also updates the rolling `preview` GitHub Pre-release with the latest snapshot JARs.
 
 ```bash
 # Ensure Java 25 is active

@@ -13,10 +13,15 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag name (e.g. v26.3-1.14.0)'
+        description: 'Release tag name (e.g. v26.3-1.14.1 or preview)'
         required: false
-        default: 'v26.3-1.14.0'
+        default: 'v26.3-1.14.1'
         type: string
+      prerelease:
+        description: 'Mark GitHub Release as a pre-release (preview)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -44,19 +49,51 @@ jobs:
           unzip -j -o libs/ForgeConfigAPIPort-v26.3.1-mc26.3.x-Fabric.jar "META-INF/jars/core-3.8.4.jar" "META-INF/jars/toml-3.8.4.jar" -d libs/
           ls -la libs/
 
+      - name: Resolve release metadata
+        id: release_meta
+        run: |
+          TAG_NAME=""
+          IS_PRERELEASE="false"
+          IS_PREVIEW_BRANCH="false"
+          GRADLE_VERSION_FLAGS=""
+
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+            TAG_VER="${TAG_NAME#v}"
+            GRADLE_VERSION_FLAGS="-Prelease=true -Pmod_version=${TAG_VER}"
+            if [[ "${TAG_NAME}" =~ -(alpha|beta|rc|preview|snapshot) ]]; then
+              IS_PRERELEASE="true"
+            fi
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG_NAME="${{ inputs.tag_name || 'v26.3-1.14.1' }}"
+            if [[ "${TAG_NAME}" != "preview" ]]; then
+              TAG_VER="${TAG_NAME#v}"
+              GRADLE_VERSION_FLAGS="-Prelease=true -Pmod_version=${TAG_VER}"
+            fi
+            if [[ "${{ inputs.prerelease }}" == "true" ]] || [[ "${TAG_NAME}" == "preview" ]] || [[ "${TAG_NAME}" =~ -(alpha|beta|rc|preview|snapshot) ]]; then
+              IS_PRERELEASE="true"
+            fi
+          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/26.3-fabric" ]]; then
+            IS_PREVIEW_BRANCH="true"
+            TAG_NAME="preview"
+            IS_PRERELEASE="true"
+          fi
+
+          MAKE_LATEST="true"
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            MAKE_LATEST="false"
+          fi
+
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "make_latest=${MAKE_LATEST}" >> "$GITHUB_OUTPUT"
+          echo "is_preview_branch=${IS_PREVIEW_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "gradle_version_flags=${GRADLE_VERSION_FLAGS}" >> "$GITHUB_OUTPUT"
+
       - name: Build, run JUnit 5 tests & compile testmod
         run: |
           chmod +x gradlew
-          GRADLE_VERSION_FLAGS=""
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG_VER="${GITHUB_REF_NAME#v}"
-            GRADLE_VERSION_FLAGS="-Prelease=true -Pmod_version=${TAG_VER}"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            DISPATCH_TAG="${{ inputs.tag_name || 'v26.3-1.14.0' }}"
-            TAG_VER="${DISPATCH_TAG#v}"
-            GRADLE_VERSION_FLAGS="-Prelease=true -Pmod_version=${TAG_VER}"
-          fi
-          ./gradlew clean build compileTestmodJava ${GRADLE_VERSION_FLAGS} --no-daemon --console=plain -Dorg.gradle.java.home="$JAVA_HOME"
+          ./gradlew clean build compileTestmodJava ${{ steps.release_meta.outputs.gradle_version_flags }} --no-daemon --console=plain -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Upload built JAR artifacts
         uses: actions/upload-artifact@v4
@@ -67,12 +104,46 @@ jobs:
             horde-optimizer/build/libs/za-horde-optimizer-fabric-*.jar
           if-no-files-found: error
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+      - name: Refresh rolling preview tag & clean stale preview assets
+        if: steps.release_meta.outputs.tag_name == 'preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f preview "${{ github.sha }}"
+          git push -f origin refs/tags/preview
+
+          if gh release view preview -R "${{ github.repository }}" >/dev/null 2>&1; then
+            for asset in $(gh release view preview -R "${{ github.repository }}" --json assets --jq '.assets[].name'); do
+              gh release delete-asset preview "$asset" -R "${{ github.repository }}" -y || true
+            done
+          fi
+
+      - name: Publish Preview Release
+        if: steps.release_meta.outputs.tag_name == 'preview'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && (inputs.tag_name || 'v26.3-1.14.0') || github.ref_name }}
-          name: ZombieAwareness ${{ github.event_name == 'workflow_dispatch' && (inputs.tag_name || 'v26.3-1.14.0') || github.ref_name }}
+          tag_name: preview
+          name: ZombieAwareness Preview (26.3-fabric)
+          body: |
+            Rolling snapshot preview build from `26.3-fabric` at commit `${{ github.sha }}`.
+            These JARs are built automatically without `-Prelease=true` and include the `-snapshot.<shortHash>` suffix.
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            build/libs/zombieawareness-fabric-*.jar
+            horde-optimizer/build/libs/za-horde-optimizer-fabric-*.jar
+
+      - name: Publish GitHub Release
+        if: (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && steps.release_meta.outputs.tag_name != 'preview'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          name: ZombieAwareness ${{ steps.release_meta.outputs.tag_name }}
+          prerelease: ${{ steps.release_meta.outputs.prerelease }}
+          make_latest: ${{ steps.release_meta.outputs.make_latest }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
