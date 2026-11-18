@@ -5,6 +5,7 @@ import com.corosus.zombieawareness.ZombieAwareness;
 import com.corosus.zombieawareness.config.ZAConfigGeneral;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -125,11 +126,13 @@ public abstract class MixinLivingEntity {
             }
         }
 
-        if (((attacker instanceof Creeper || directEntity instanceof Creeper) && ZAUtil.isHostileMob(victim))
+        boolean isExplosion = source.is(DamageTypeTags.IS_EXPLOSION);
+        boolean bypassExplosionBlock = isExplosion && com.corosus.zombieawareness.config.ZAConfigZDay.allowHordeFriendlyExplosiveFire;
+        if (!bypassExplosionBlock && (((attacker instanceof Creeper || directEntity instanceof Creeper) && ZAUtil.isHostileMob(victim))
                 || (ZAUtil.isHostileMob(victim) && directEntity instanceof PrimedTnt tnt && (tnt.entityTags().contains("za_sapper_tnt") || ZAUtil.isHostileMob(tnt.getOwner())))
-                || (ZAUtil.isHostileMob(victim) && attacker instanceof PrimedTnt attackerTnt && (attackerTnt.entityTags().contains("za_sapper_tnt") || ZAUtil.isHostileMob(attackerTnt.getOwner())))
-                || ZAUtil.shouldBlockHostileFriendlyFireOrAggro(attacker, victim)
-                || ZAUtil.shouldBlockHostileFriendlyFireOrAggro(directEntity, victim)) {
+                || (ZAUtil.isHostileMob(victim) && attacker instanceof PrimedTnt attackerTnt && (attackerTnt.entityTags().contains("za_sapper_tnt") || ZAUtil.isHostileMob(attackerTnt.getOwner()))))
+                || ZAUtil.shouldBlockHostileFriendlyFireOrAggro(attacker, victim, isExplosion)
+                || ZAUtil.shouldBlockHostileFriendlyFireOrAggro(directEntity, victim, isExplosion)) {
             cir.setReturnValue(false);
             return;
         }

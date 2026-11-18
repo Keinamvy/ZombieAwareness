@@ -268,6 +268,44 @@ public class ChunkHeatManager {
         return Math.min(1.0D, baseChance * computeStageEliteSpawnMultiplier(worldStageNum));
     }
 
+    /**
+     * Stages 1-2 keep early horde zombies near player walking speed (~4.3 blocks/s),
+     * transitioning smoothly via short Speed I in Stages 3-4 before full Speed II in Stages 5+.
+     */
+    public static boolean canGrantSprinterSpeedEffect(int worldStageNum, double roll) {
+        if (worldStageNum <= 2) {
+            return false;
+        }
+        if (worldStageNum == 3) {
+            return roll >= 0.0D && roll < 0.25D;
+        }
+        if (worldStageNum == 4) {
+            return roll >= 0.0D && roll < 0.40D;
+        }
+        if (worldStageNum <= 6) {
+            return roll >= 0.0D && roll < 0.75D;
+        }
+        return true;
+    }
+
+    public static int computeSprinterSpeedAmplifier(int worldStageNum) {
+        return worldStageNum >= 5 ? 1 : 0;
+    }
+
+    public static int computeSprinterSpeedDurationTicks(int worldStageNum) {
+        return worldStageNum >= 5 ? 7200 : 1200;
+    }
+
+    private static void applyStageSprinterSpeed(Mob mob, int worldStageNum, double roll) {
+        if (mob != null && canGrantSprinterSpeedEffect(worldStageNum, roll)) {
+            mob.addEffect(new MobEffectInstance(
+                    MobEffects.SPEED,
+                    computeSprinterSpeedDurationTicks(worldStageNum),
+                    computeSprinterSpeedAmplifier(worldStageNum)
+            ));
+        }
+    }
+
     public static void announceHordeNotice(ServerLevel overworld, ActiveHorde horde, String message, SoundEvent cueSound) {
         if (overworld == null || horde == null) return;
         Component text = Component.literal(message);
@@ -1532,7 +1570,7 @@ public class ChunkHeatManager {
         if (worldStageNum >= 5) {
             new com.nll.nightmareesm.GiveRandomPickaxe(zombie);
         } else {
-            zombie.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+            applyStageSprinterSpeed(zombie, worldStageNum, rand.nextDouble());
         }
         return zombie;
     }
@@ -1633,7 +1671,7 @@ public class ChunkHeatManager {
 
                 if (isWaterSpawn) {
                     Drowned drowned = new Drowned(EntityTypes.DROWNED, level);
-                    drowned.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                    applyStageSprinterSpeed(drowned, worldStageNum, rand.nextDouble());
                     mob = drowned;
                 } else if (isFlank) {
                     double flankRoll = rand.nextDouble();
@@ -1659,7 +1697,7 @@ public class ChunkHeatManager {
                         mob = z;
                     } else {
                         Zombie z = new Zombie(level);
-                        z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                        applyStageSprinterSpeed(z, worldStageNum, rand.nextDouble());
                         mob = z;
                     }
                 } else {
@@ -1674,7 +1712,7 @@ public class ChunkHeatManager {
                                 z.addTag(HordeSpecialUnitHelper.CRAWLER_TAG);
                                 z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
                             } else {
-                                z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                                applyStageSprinterSpeed(z, worldStageNum, rand.nextDouble());
                             }
                             mob = z;
                         }
@@ -1692,7 +1730,7 @@ public class ChunkHeatManager {
                                 mob = z;
                             } else if (roll < 0.65f) {
                                 Zombie z = new Zombie(level);
-                                z.addEffect(new MobEffectInstance(MobEffects.SPEED, 7200, 1));
+                                applyStageSprinterSpeed(z, worldStageNum, rand.nextDouble());
                                 mob = z;
                             } else if (roll < 0.85f) {
                                 mob = createMobById(level, "cave_spider");
@@ -1906,7 +1944,7 @@ public class ChunkHeatManager {
     }
 
     public static void tickServer(ServerLevel overworld) {
-        if (overworld == null) return;
+        if (overworld == null || !overworld.tickRateManager().runsNormally()) return;
         long currentTick = overworld.getGameTime();
 
         if (currentTick % 1200L == 0) {

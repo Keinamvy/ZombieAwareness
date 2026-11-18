@@ -1,5 +1,6 @@
 package com.corosus.zombieawareness;
 
+import com.corosus.zombieawareness.config.ZAConfigZDay;
 import com.corosus.zombieawareness.heat.ChunkHeatManager;
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.AfterEach;
@@ -80,5 +81,23 @@ public class HordeVillagerTargetRegressionTest {
         // Expired horde must not match
         matched.elapsedTicks = matched.totalDurationTicks;
         assertNull(ChunkHeatManager.findNearestActiveHorde(240.0, 64.0, -150.0));
+    }
+
+    @Test
+    void allowHordeFriendlyExplosiveFireConfigTogglesExplosionDamageWithoutAllowingMeleeFriendlyFire() {
+        assertFalse(ZAConfigZDay.allowHordeFriendlyExplosiveFire,
+                "allowHordeFriendlyExplosiveFire must default to false");
+
+        // When false (default), BOTH explosion and non-explosion friendly fire are blocked
+        assertTrue(ZAUtil.shouldBlockHostileFriendlyFireDamage(true, true, true, false));
+        assertTrue(ZAUtil.shouldBlockHostileFriendlyFireDamage(true, true, false, false));
+
+        // When true, ONLY explosions between hostile/horde mobs are permitted; melee/arrows/sonic boom stay blocked
+        assertFalse(ZAUtil.shouldBlockHostileFriendlyFireDamage(true, true, true, true));
+        assertTrue(ZAUtil.shouldBlockHostileFriendlyFireDamage(true, true, false, true));
+
+        // Non-hostile victims (e.g., players) are never blocked by friendly-fire rule
+        assertFalse(ZAUtil.shouldBlockHostileFriendlyFireDamage(true, false, false, false));
+        assertFalse(ZAUtil.shouldBlockHostileFriendlyFireDamage(true, false, true, false));
     }
 }

@@ -104,5 +104,21 @@ public class HordeCapAndDamageCloneTest {
         assertFalse(ZAUtil.canTriggerDamageClone(
                 true, true, true, false, true, 0.0f,
                 -1L, 500L, 200L, 10, 48, 0.08, 0.01));
+
+        // Large-HP mobs (Tanker 40 HP, Knight 30 HP, Warden 500 HP) and restricted elites must not clone
+        assertEquals(25.0f, ZAUtil.MAX_CLONE_SOURCE_MAX_HEALTH, 1e-6f);
+        assertEquals("za_cloned_mob", ZAUtil.CLONED_MOB_TAG);
+        assertFalse(ZAUtil.canTriggerDamageClone(
+                true, true, true, false, true, 5.0f,
+                -1L, 500L, 200L, 10, 48, 0.08, 0.01, 40.0f, false));
+        assertFalse(ZAUtil.canTriggerDamageClone(
+                true, true, true, false, true, 5.0f,
+                -1L, 500L, 200L, 10, 48, 0.08, 0.01, 500.0f, false));
+        assertFalse(ZAUtil.canTriggerDamageClone(
+                true, true, true, false, true, 5.0f,
+                -1L, 500L, 200L, 10, 48, 0.08, 0.01, 20.0f, true));
+        assertTrue(ZAUtil.canTriggerDamageClone(
+                true, true, true, false, true, 5.0f,
+                -1L, 500L, 200L, 10, 48, 0.08, 0.01, 20.0f, false));
     }
 }

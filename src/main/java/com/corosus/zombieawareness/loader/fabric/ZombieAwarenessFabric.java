@@ -95,6 +95,9 @@ public class ZombieAwarenessFabric extends ZombieAwareness implements ModInitial
 		});
 
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			if (!server.tickRateManager().runsNormally()) {
+				return;
+			}
 			ZDayProgressionManager.tickServer(server);
 			ServerLevel overworld = server.overworld();
 			if (overworld != null) {

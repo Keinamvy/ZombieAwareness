@@ -325,4 +325,38 @@ public class HordeSpecialUnitsAndRapidSpawnTest {
         assertTrue(ChunkHeatManager.canSpawnEliteInStage(HordeSpecialUnitHelper.SAPPER_TAG, 8));
         assertEquals(0.14D, ChunkHeatManager.computeScaledEliteChance(0.14D, HordeSpecialUnitHelper.SAPPER_TAG, 10), 1e-6);
     }
+
+    @Test
+    void earlyStageSprinterAndRandomSpeedBoostNerfedToPlayerWalkingSpeedInStagesOneAndTwo() {
+        // ZAUtil random speed boost scale keeps Stages 1-2 zombies near vanilla 0.23 (~4.3 blocks/s) walking speed
+        assertEquals(0.0D, ZAUtil.computeStageSpeedBoostMultiplier(1), 1e-6);
+        assertTrue(ZAUtil.computeStageSpeedBoostMultiplier(2) <= 0.10D);
+        assertEquals(0.08D, ZAUtil.computeStageSpeedBoostMultiplier(2), 1e-6);
+        assertEquals(0.35D, ZAUtil.computeStageSpeedBoostMultiplier(3), 1e-6);
+        assertEquals(0.50D, ZAUtil.computeStageSpeedBoostMultiplier(4), 1e-6);
+        assertEquals(0.75D, ZAUtil.computeStageSpeedBoostMultiplier(5), 1e-6);
+        assertEquals(0.75D, ZAUtil.computeStageSpeedBoostMultiplier(6), 1e-6);
+        assertEquals(1.0D, ZAUtil.computeStageSpeedBoostMultiplier(7), 1e-6);
+        assertEquals(1.0D, ZAUtil.computeStageSpeedBoostMultiplier(10), 1e-6);
+
+        // Stages 1-2 grant zero MobEffects.SPEED sprinters
+        assertFalse(ChunkHeatManager.canGrantSprinterSpeedEffect(1, 0.0D));
+        assertFalse(ChunkHeatManager.canGrantSprinterSpeedEffect(2, 0.0D));
+
+        // Stages 3-4 give gentle short Speed I transition at modest rates (25% / 40%)
+        assertTrue(ChunkHeatManager.canGrantSprinterSpeedEffect(3, 0.24D));
+        assertFalse(ChunkHeatManager.canGrantSprinterSpeedEffect(3, 0.25D));
+        assertTrue(ChunkHeatManager.canGrantSprinterSpeedEffect(4, 0.39D));
+        assertFalse(ChunkHeatManager.canGrantSprinterSpeedEffect(4, 0.40D));
+        assertEquals(0, ChunkHeatManager.computeSprinterSpeedAmplifier(3));
+        assertEquals(1200, ChunkHeatManager.computeSprinterSpeedDurationTicks(4));
+
+        // Stages 5-6 ramp to 75% with Speed II; Stages 7+ grant 100% Speed II
+        assertTrue(ChunkHeatManager.canGrantSprinterSpeedEffect(5, 0.74D));
+        assertFalse(ChunkHeatManager.canGrantSprinterSpeedEffect(5, 0.75D));
+        assertEquals(1, ChunkHeatManager.computeSprinterSpeedAmplifier(5));
+        assertEquals(7200, ChunkHeatManager.computeSprinterSpeedDurationTicks(5));
+        assertTrue(ChunkHeatManager.canGrantSprinterSpeedEffect(7, 0.99D));
+        assertTrue(ChunkHeatManager.canGrantSprinterSpeedEffect(10, 0.99D));
+    }
 }

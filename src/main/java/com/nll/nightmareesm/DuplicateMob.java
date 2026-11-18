@@ -17,7 +17,8 @@ public class DuplicateMob {
    }
 
    public static void duplicate(Mob M, int Count) {
-      if (M != null && Count > 0 && ZAUtil.isHordeMob(M) && ConfigHelper.ConfigHasValue(ESMConfig.DuplicatedMobs, M, false)) {
+      if (M != null && Count > 0 && ZAUtil.isHordeMob(M) && ZAUtil.canMobCloneByHealthAndRole(M)
+              && ConfigHelper.ConfigHasValue(ESMConfig.DuplicatedMobs, M, false)) {
          for (int i = 0; i < Count; i++) {
             cloneMob(M);
          }
@@ -45,7 +46,7 @@ public class DuplicateMob {
    }
 
    private static void spawnCloneOnServerThread(ServerLevel Lvl, Mob M) {
-      if (Lvl == null || M == null || !M.isAlive() || M.isRemoved()) {
+      if (Lvl == null || M == null || !M.isAlive() || M.isRemoved() || !ZAUtil.canMobCloneByHealthAndRole(M)) {
          return;
       }
       BlockPos pos = M.blockPosition();
@@ -54,7 +55,12 @@ public class DuplicateMob {
       }
       BlockPos Offset_Pos = getOffsetPosition(pos);
       if (isPositionGood(Lvl, Offset_Pos)) {
-         M.getType().spawn(Lvl, new ItemStack(Items.DIRT), null, Offset_Pos, EntitySpawnReason.MOB_SUMMONED, true, false);
+         Mob spawned = (Mob) M.getType().spawn(Lvl, new ItemStack(Items.DIRT), null, Offset_Pos, EntitySpawnReason.MOB_SUMMONED, true, false);
+         if (spawned != null) {
+            spawned.addTag(ZAUtil.CLONED_MOB_TAG);
+            spawned.addTag(ZAUtil.DAMAGE_CLONE_TAG);
+            spawned.addTag("za_horde_mob");
+         }
       }
    }
 

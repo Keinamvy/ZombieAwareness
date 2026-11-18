@@ -63,6 +63,10 @@ In ordinary zombie shooters, guns solve problems. Here, guns solve *one* problem
   - **Stages 5–6 (Days 57–72)**: `0.55x` / `0.70x` — unlocks `[KNIGHT]` at Stage 5 and `[SCREAMER]` at Stage 6 at reduced rates.
   - **Stages 7–8 (Days 73–90)**: `0.80x` / `0.90x` — unlocks `[JUGGERNAUT]` at Stage 7 and `[SAPPER]` at Stage 8; ambient NightmareESM Screamer & Juggernaut rolls also scale by stage.
   - **Stages 9–10 (Days 91–100+)**: `1.0x` full siege intensity.
+- **Stage-Scaled Early Sprinter Speed (`computeStageSpeedBoostMultiplier` & `canGrantSprinterSpeedEffect`)**:
+  - **Stages 1–2 (Days 1–40)**: **No `MobEffects.SPEED` sprinters** and `0.0x` (Stage 1) / `0.08x` (Stage 2) `zombieRandSpeedBoost` scaling so zombies stay near vanilla `0.23` movement speed (~player walking speed `4.3` blocks/s).
+  - **Stages 3–4 (Days 41–56)**: Gentle transition (`0.35x` / `0.50x` random boost; `25%` / `40%` chance for short Speed I instead of permanent Speed II).
+  - **Stages 5+ (Days 57+)**: Ramps through `0.75x` (`Stages 5–6`) up to full `1.0x` sprinter Speed II (`Stages 7+`).
 - **70/30 Pincer & Silent Flank Waves**: `spawnPhasedSubWave` routes **70%** of spawns (`index % 10 < 7`) along the primary front (`approachAngleRad`, favoring `[TANKER]`, `[JUGGERNAUT]`, `[ENGINEER]`, and mainline troops) and **30%** into **silent flanking ambushes** (`index % 10 >= 7`, spawned `120°–240°` behind the front without an extra roar, favoring `[CRAWLER]`, `[KNIGHT]`, and `[SAPPER]`).
 - **`<= 24m` Victory Close-Combat Retention**: When a horde ends in **Victory**, only stragglers further than **`24.0` blocks** from the nearest alive player retreat and despawn cleanly with smoke particles—mobs already engaged within **`<= 24.0` blocks** fight to the death! (All remaining Siege Engineer bridges/pillars collapse immediately on victory, wipe, or target loss.)
 - **Active Player Tracking**: Hordes lock onto player positions (`noTargetTicks` auto-cancels after `100` ticks if no players remain in range) and **strictly ignore villagers** (`ZAUtil.shouldBlockHordeTarget` / `MixinMob`), keeping the siege focused on players and their defenses.
@@ -134,7 +138,7 @@ All special horde units feature colored overhead nameplates (`setCustomNameVisib
 ## 🤝 Horde Unity: Zero Friendly-Fire
 
 - 🚫 **Zero Cross-Hostile / Warden Aggro**: `ZAUtil.shouldBlockHostileFriendlyFireOrAggro`, `MixinLivingEntity`, `MixinMob`, and `MixinWarden#canTargetEntity` prevent hostile mobs and Bloodmoon Wardens from targeting or damaging each other (including `za_knight_mount` Zombie Horses, melee hits, and Sonic Boom blasts).
-- 🛡️ **Explosion Immunity**: Creeper breaches and `za_sapper_tnt` detonations deal **0 damage** to fellow hostile or horde mobs.
+- 🛡️ **Explosion Immunity (Configurable)**: Creeper breaches and `za_sapper_tnt` / thrown sapper detonations deal **0 damage** to fellow hostile or horde mobs by default (`allowHordeFriendlyExplosiveFire = false` in `config/ZombieAwareness/ZDayProgression.cfg`). Setting `allowHordeFriendlyExplosiveFire = true` permits explosion friendly fire between hostile/horde mobs while keeping melee, arrows, and Warden Sonic Boom friendly fire blocked.
 
 ---
 
@@ -200,8 +204,8 @@ Zombie Awareness and NightmareESM are hardened for heavily threaded modpacks (e.
 
 ### Building, Automatic Versioning & Running Tests
 
-- **Release Builds (`-Prelease=true` or `v*` Git tag)**: Produce clean SemVer artifacts (`26.3-1.14.0` and `26.3-1.1.0`), automated in [`.github/workflows/release.yml`](.github/workflows/release.yml).
-- **Development Builds (default `./gradlew build` off-tag)**: Automatically append SemVer build metadata (`+build.<commitCount>.g<shortSha>`) for traceability, with optional `-Pmod_version=...` / `-Paddon_version=...` overrides.
+- **Release Builds (`-Prelease=true` on tag/dispatch)**: Produce clean SemVer artifacts (`26.3-1.14.0` and `26.3-1.1.0`), automated in [`.github/workflows/release.yml`](.github/workflows/release.yml).
+- **Snapshot Builds (default `./gradlew build` without `-Prelease=true`)**: Automatically append `-snapshot.<shortSha>` (e.g., `26.3-1.14.0-snapshot.ac03dee` and `26.3-1.1.0-snapshot.ac03dee`) to both JARs and `fabric.mod.json` manifests, with optional `-Pmod_version=...` / `-Paddon_version=...` overrides.
 
 ```bash
 # Ensure Java 25 is active
@@ -210,11 +214,11 @@ java -version
 # Clean release build for both ZombieAwareness and za-horde-optimizer + run all JUnit 5 tests
 ./gradlew clean build -Prelease=true
 
-# Non-release dev build (appends +build.<count>.g<sha>)
+# Snapshot dev build (appends -snapshot.<shortSha> to both JARs)
 ./gradlew build
 
 # Also verify the Fabric testmod sources compile cleanly
-./gradlew compileTestmodJava -Prelease=true
+./gradlew compileTestmodJava
 ```
 
 Built release artifacts are output to:

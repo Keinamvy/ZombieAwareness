@@ -69,6 +69,9 @@ public class ZDayProgressionManager {
     }
 
     public static void tickServer(MinecraftServer server) {
+        if (server == null || !server.tickRateManager().runsNormally()) {
+            return;
+        }
         currentServer = server;
         if (ledger == null || ledgerPath == null) {
             initServer(server);

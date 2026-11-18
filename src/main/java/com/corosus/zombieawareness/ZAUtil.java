@@ -99,6 +99,9 @@ public class ZAUtil {
     public static final double DAMAGE_CLONE_LOOT_MULTIPLIER = 0.25D; // Clones drop at 25% of a normal mob's drop rate
     public static final double NORMAL_HORDE_GUNPOWDER_DROP_CHANCE = 0.50D; // 50% chance for normal horde mobs to drop 1-3 gunpowder
     public static final String DAMAGE_CLONE_TAG = "za_damage_clone";
+    public static final String CLONED_MOB_TAG = "za_cloned_mob";
+    /** Maximum source mob max-health allowed to clone; blocks Wardens, Tankers, Knights, and other large-HP mobs. */
+    public static final float MAX_CLONE_SOURCE_MAX_HEALTH = 25.0F;
 
     public static final long ONE_HEART_CLUTCH_COOLDOWN_TICKS = 6000L; // 5 minutes
     public static final double ONE_HEART_CLUTCH_CHANCE = 0.25D;
@@ -386,12 +389,26 @@ public class ZAUtil {
 		return ZombieAwareness.getPersistentDataSafe(ent).getBooleanOr(SPEED_BOOST_TAG, false);
 	}
 	
+	public static double computeStageSpeedBoostMultiplier(int worldStageNum) {
+		if (worldStageNum <= 1) return 0.0D;
+		if (worldStageNum == 2) return 0.08D;
+		if (worldStageNum == 3) return 0.35D;
+		if (worldStageNum == 4) return 0.50D;
+		if (worldStageNum <= 6) return 0.75D;
+		return 1.0D;
+	}
+
 	public static void giveRandomSpeedBoost(Mob ent) {
 		if (ent == null || ent.entityTags().contains(TANKER_TAG)) {
 			return;
 		}
 		if (ZAConfigGeneral.zombieRandSpeedBoost > 0) {
-			double randBoost = CU.rand().nextDouble() * ZAConfigGeneral.zombieRandSpeedBoost;
+			int worldStage = com.corosus.zombieawareness.zday.ZDayProgressionManager.getCurrentStage().getStageNumber();
+			double stageScale = computeStageSpeedBoostMultiplier(worldStage);
+			if (stageScale <= 0.0D) {
+				return;
+			}
+			double randBoost = CU.rand().nextDouble() * ZAConfigGeneral.zombieRandSpeedBoost * stageScale;
 			if (ent.isBaby()) {
 				randBoost *= -1;
 			}
@@ -524,21 +541,43 @@ public class ZAUtil {
 		return wardenIsHorde && (targetIsHorde || targetIsHostile || targetIsVillager);
 	}
 
+	public static boolean shouldBlockHostileFriendlyFireDamage(
+			boolean attackerOrDirectIsHostileOrHordeOrSapperTnt,
+			boolean victimIsHostileOrHorde,
+			boolean isExplosion,
+			boolean allowFriendlyExplosiveFire) {
+		if (!victimIsHostileOrHorde || !attackerOrDirectIsHostileOrHordeOrSapperTnt) {
+			return false;
+		}
+		if (isExplosion && allowFriendlyExplosiveFire) {
+			return false;
+		}
+		return true;
+	}
+
 	public static boolean shouldBlockHostileFriendlyFireOrAggro(Entity sourceOrAttacker, Entity victim) {
+		return shouldBlockHostileFriendlyFireOrAggro(sourceOrAttacker, victim, false);
+	}
+
+	public static boolean shouldBlockHostileFriendlyFireOrAggro(Entity sourceOrAttacker, Entity victim, boolean isExplosion) {
 		if (sourceOrAttacker == null || victim == null) {
 			return false;
 		}
-		if (isHostileMob(victim) || isHordeMob(victim)) {
-			if (isHostileMob(sourceOrAttacker) || isHordeMob(sourceOrAttacker)) {
-				return true;
-			}
-			if (sourceOrAttacker instanceof PrimedTnt tnt && (tnt.entityTags().contains("za_sapper_tnt")
-					|| isHostileMob(tnt.getOwner())
-					|| isHordeMob(tnt.getOwner()))) {
-				return true;
-			}
+		boolean victimHostileOrHorde = isHostileMob(victim) || isHordeMob(victim);
+		if (!victimHostileOrHorde) {
+			return false;
 		}
-		return false;
+		boolean sourceHostileOrHorde = isHostileMob(sourceOrAttacker)
+				|| isHordeMob(sourceOrAttacker)
+				|| (sourceOrAttacker instanceof PrimedTnt tnt && (tnt.entityTags().contains("za_sapper_tnt")
+						|| isHostileMob(tnt.getOwner())
+						|| isHordeMob(tnt.getOwner())));
+		return shouldBlockHostileFriendlyFireDamage(
+				sourceHostileOrHorde,
+				true,
+				isExplosion,
+				ZAConfigZDay.allowHordeFriendlyExplosiveFire
+		);
 	}
 	
     public static boolean isEnemy(Entity ent, Entity targ, boolean omniTarget) {
@@ -1179,7 +1218,7 @@ public class ZAUtil {
     }
 
 	public static boolean isZombieAwarenessActive(Level world) {
-		if (world == null) return false;
+		if (world == null || !world.tickRateManager().runsNormally()) return false;
 		if (ZAConfigGeneral.daysBeforeFeaturesActivate <= 0) return true;
 		double day = ((double)world.getDefaultClockTime() / CoroUtilWorldTime.getDayLength());
 		if (day >= ZAConfigGeneral.daysBeforeFeaturesActivate) {
@@ -1686,6 +1725,38 @@ public class ZAUtil {
         lastDamageCloneTickMap.clear();
     }
 
+    /**
+     * Returns true if {@code entity} has any clone marker tag and must never clone again.
+     */
+    public static boolean isClonedMob(Entity entity) {
+        if (entity == null) {
+            return false;
+        }
+        Set<String> tags = entity.entityTags();
+        return tags.contains(DAMAGE_CLONE_TAG) || tags.contains(CLONED_MOB_TAG);
+    }
+
+    /**
+     * Returns true if {@code mob} is eligible to clone based on its max HP and role/type.
+     * Prevents Wardens, Tankers, Knights, Juggernauts, Engineers, Sappers, Screamers, and any
+     * large-HP mob ({@code maxHealth > MAX_CLONE_SOURCE_MAX_HEALTH}) from cloning.
+     */
+    public static boolean canMobCloneByHealthAndRole(Mob mob) {
+        if (mob == null) {
+            return false;
+        }
+        if (mob instanceof net.minecraft.world.entity.monster.warden.Warden) {
+            return false;
+        }
+        if (isClonedMob(mob) || isEliteHordeMob(mob)) {
+            return false;
+        }
+        if (mob.entityTags().contains("za_knight_mount")) {
+            return false;
+        }
+        return mob.getMaxHealth() <= MAX_CLONE_SOURCE_MAX_HEALTH;
+    }
+
     public static boolean canTriggerDamageClone(
             boolean isHordeMob,
             boolean isHostileMob,
@@ -1700,7 +1771,45 @@ public class ZAUtil {
             int maxNearbyMobs,
             double cloneChance,
             double randomZeroToOne) {
-        if (!isHordeMob || !isHostileMob || !isAlive || hasCloneTag || !hasAttackerEntity || damageAmount <= 0.0f) {
+        return canTriggerDamageClone(
+                isHordeMob,
+                isHostileMob,
+                isAlive,
+                hasCloneTag,
+                hasAttackerEntity,
+                damageAmount,
+                lastCloneTick,
+                currentTick,
+                cooldownTicks,
+                nearbyMobCount,
+                maxNearbyMobs,
+                cloneChance,
+                randomZeroToOne,
+                20.0F,
+                false
+        );
+    }
+
+    public static boolean canTriggerDamageClone(
+            boolean isHordeMob,
+            boolean isHostileMob,
+            boolean isAlive,
+            boolean hasCloneTag,
+            boolean hasAttackerEntity,
+            float damageAmount,
+            long lastCloneTick,
+            long currentTick,
+            long cooldownTicks,
+            int nearbyMobCount,
+            int maxNearbyMobs,
+            double cloneChance,
+            double randomZeroToOne,
+            float mobMaxHealth,
+            boolean isLargeOrRestrictedMob) {
+        if (!isHordeMob || !isHostileMob || !isAlive || hasCloneTag || isLargeOrRestrictedMob || !hasAttackerEntity || damageAmount <= 0.0f) {
+            return false;
+        }
+        if (mobMaxHealth <= 0.0F || mobMaxHealth > MAX_CLONE_SOURCE_MAX_HEALTH) {
             return false;
         }
         if (cloneChance <= 0.0) {
@@ -1720,7 +1829,7 @@ public class ZAUtil {
             return 0;
         }
         boolean parentIsHorde = isHordeMob(mob);
-        if (!parentIsHorde) {
+        if (!parentIsHorde || !canMobCloneByHealthAndRole(mob)) {
             return 0;
         }
         if (level.getServer() == null || !level.getServer().isSameThread() || !level.isLoaded(mob.blockPosition())) {
@@ -1738,7 +1847,7 @@ public class ZAUtil {
                 parentIsHorde,
                 isHostileMob(mob),
                 mob.isAlive() && !mob.isRemoved(),
-                mob.entityTags().contains(DAMAGE_CLONE_TAG),
+                isClonedMob(mob),
                 source.getEntity() != null,
                 amount,
                 lastCloneTick,
@@ -1747,7 +1856,9 @@ public class ZAUtil {
                 nearbyHostiles,
                 ZAConfigZDay.mobDamageCloneMaxNearby,
                 ZAConfigZDay.mobDamageCloneChance,
-                level.getRandom().nextDouble()
+                level.getRandom().nextDouble(),
+                mob.getMaxHealth(),
+                !canMobCloneByHealthAndRole(mob)
         );
         if (!allowed) {
             return 0;
@@ -1795,6 +1906,7 @@ public class ZAUtil {
                     continue;
                 }
                 clone.addTag(DAMAGE_CLONE_TAG);
+                clone.addTag(CLONED_MOB_TAG);
                 if (parentIsHorde) {
                     clone.addTag("za_horde_mob");
                     if (parentIsApex) {

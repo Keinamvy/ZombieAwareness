@@ -22,18 +22,8 @@ ext.resolveBuildVersion = { String baseVersion, boolean explicitOverride ->
 	if (explicitOverride || isReleaseFlag) {
 		return baseVersion
 	}
-	String exactTag = runGitTrimmed(['describe', '--tags', '--exact-match', 'HEAD'])
-	String envRef = System.getenv('GITHUB_REF') ?: ''
-	boolean onReleaseTag = (exactTag != null && (exactTag == "v${baseVersion}" || exactTag == baseVersion)) || envRef.startsWith('refs/tags/v') || envRef.startsWith('refs/tags/26.3')
-	if (onReleaseTag) {
-		return baseVersion
-	}
-	String commitCount = runGitTrimmed(['rev-list', '--count', 'HEAD'])
 	String shortSha = runGitTrimmed(['rev-parse', '--short', 'HEAD'])
-	if (commitCount != null && shortSha != null) {
-		return "${baseVersion}+build.${commitCount}.g${shortSha}"
-	}
-	return baseVersion
+	return shortSha != null ? "${baseVersion}-snapshot.${shortSha}" : "${baseVersion}-snapshot"
 }
 
 version = ext.resolveBuildVersion(project.mod_version.toString(), gradle.startParameter.projectProperties.containsKey('mod_version'))

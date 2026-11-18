@@ -44,7 +44,7 @@ public class BloodmoonManager {
     }
 
     public static void tickServer(ServerLevel overworld) {
-        if (overworld == null) return;
+        if (overworld == null || !overworld.tickRateManager().runsNormally()) return;
         if (!isBloodmoonActive(overworld)) {
             return;
         }

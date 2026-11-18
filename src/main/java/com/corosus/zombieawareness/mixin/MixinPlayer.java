@@ -31,7 +31,7 @@ public abstract class MixinPlayer {
     public void hook2(CallbackInfo ci) {
         ZombieAwareness.unitTest("11");
         Player ent = ((Player)(Object)this);
-        if (ent.level().isClientSide()) return;
+        if (ent.level().isClientSide() || !ent.level().tickRateManager().runsNormally()) return;
 
         if (ent.level().getGameTime() % ZAConfigGeneral.tickRatePlayerLoop == 0) {
             ZAUtil.tickPlayer(ent);

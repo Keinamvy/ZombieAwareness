@@ -94,6 +94,9 @@ public class ZAConfigZDay implements IConfigCategory {
     @ConfigComment("Maximum bonus diamonds dropped by non-Warden elite horde mobs per 5-minute (6000-tick) rolling window across all hordes")
     public static int maxBonusDiamondsPerHordeWindow = 32;
 
+    @ConfigComment("If true, explosions from horde/hostile mobs (Creepers, TNT Sappers, placed TNT) can damage other horde/hostile mobs")
+    public static boolean allowHordeFriendlyExplosiveFire = false;
+
     @Override
     public String getName() {
         return "ZDayProgression";

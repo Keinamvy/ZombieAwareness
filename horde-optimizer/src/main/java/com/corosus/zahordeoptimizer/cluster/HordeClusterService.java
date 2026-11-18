@@ -471,7 +471,7 @@ public final class HordeClusterService {
     }
 
     public static void onEndLevelTick(ServerLevel level) {
-        if (level == null) {
+        if (level == null || !level.tickRateManager().runsNormally()) {
             return;
         }
         LevelClusterRuntime runtime = LEVEL_RUNTIMES.get(level);
